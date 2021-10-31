@@ -29,7 +29,9 @@ import javax.swing.border.Border;
  */
 public abstract class AbstractGCellRenderer extends JLabel {
 
-	private static final Color ALTERNATE_BACKGROUND_COLOR = new Color(237, 243, 254);
+	private static final Color ALTERNATE_BACKGROUND_COLOR = new Color(0x32, 0x32, 0x32);
+	private static final Color REGULAR_BACKGROUND_COLOR = new Color(0x2b, 0x2b, 0x2b);
+	
 
 	/** Allows the user to disable alternating row colors on JLists & JTables */
 	private static final String DISABLE_ALTERNATING_ROW_COLORS_PROPERTY =
@@ -182,7 +184,7 @@ public abstract class AbstractGCellRenderer extends JLabel {
 	protected static Color getBackgroundColorForRow(int row) {
 
 		if ((row & 1) == 1) {
-			return Color.WHITE;
+			return REGULAR_BACKGROUND_COLOR;
 		}
 		return ALTERNATE_BACKGROUND_COLOR;
 	}
