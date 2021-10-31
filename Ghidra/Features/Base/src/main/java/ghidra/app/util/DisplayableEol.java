@@ -36,7 +36,6 @@ import ghidra.program.util.*;
  */
 public class DisplayableEol {
 
-	private static final String VAR_ARGS = "...";
 	private static final String POINTER_ARROW = "-> ";
 
 	public static final int MY_EOLS = 0;
@@ -48,19 +47,16 @@ public class DisplayableEol {
 	private boolean alwaysShowRepeatable = false;
 	private boolean alwaysShowRefRepeats = false;
 	private boolean alwaysShowAutomatic = false;
+	private boolean showAutomaticFunctions;
 	private boolean operandsFollowPointerRefs = false;
 	private int maxDisplayLines;
 	private int totalCommentsFound;
 
 	private boolean useAbbreviatedAutomatic;
 
-	/**
-	 * Construct a new DisplayableEol.
-	 * @param cu code unit that may have end of line or repeatable comments.
-	 */
 	public DisplayableEol(CodeUnit cu, boolean alwaysShowRepeatable, boolean alwaysShowRefRepeats,
 			boolean alwaysShowAutomatic, boolean operandsFollowPointerRefs, int maxDisplayLines,
-			boolean useAbbreviatedAutomatic) {
+			boolean useAbbreviatedAutomatic, boolean showAutomaticFunctions) {
 		this.codeUnit = cu;
 		this.alwaysShowRepeatable = alwaysShowRepeatable;
 		this.alwaysShowRefRepeats = alwaysShowRefRepeats;
@@ -68,6 +64,7 @@ public class DisplayableEol {
 		this.operandsFollowPointerRefs = operandsFollowPointerRefs;
 		this.maxDisplayLines = maxDisplayLines;
 		this.useAbbreviatedAutomatic = useAbbreviatedAutomatic;
+		this.showAutomaticFunctions = showAutomaticFunctions;
 
 		initComments();
 	}
@@ -80,7 +77,7 @@ public class DisplayableEol {
 			codeUnit.getCommentAsArray(CodeUnit.REPEATABLE_COMMENT);
 		totalCommentsFound += displayCommentArrays[MY_REPEATABLES].length;
 
-		displayCommentArrays[REF_REPEATABLES] = new String[0];
+		displayCommentArrays[REF_REPEATABLES] = new RefRepeatComment[0];
 		displayCommentArrays[MY_AUTOMATIC] = new String[0];
 		if (totalCommentsFound > maxDisplayLines) {
 			// no more room to display the comments below; don't process them
@@ -118,7 +115,8 @@ public class DisplayableEol {
 	}
 
 	/**
-	 * Return whether the associated code unit has an end of line comment.
+	 * Return whether the associated code unit has an end of line comment
+	 * @return whether the associated code unit has an end of line comment 
 	 */
 	public boolean hasEOL() {
 		return (displayCommentArrays[MY_EOLS] != null) &&
@@ -126,7 +124,8 @@ public class DisplayableEol {
 	}
 
 	/**
-	 * Return whether the associated code unit has a repeatable comment.
+	 * Return whether the associated code unit has a repeatable comment
+	 * @return whether the associated code unit has a repeatable comment
 	 */
 	public boolean hasRepeatable() {
 		return (displayCommentArrays[MY_REPEATABLES] != null) &&
@@ -135,7 +134,9 @@ public class DisplayableEol {
 
 	/**
 	 * Return whether any memory reference from this code unit has a repeatable
-	 * comment at the reference's to address.
+	 * comment at the reference's to address
+	 * @return whether any memory reference from this code unit has a repeatable
+	 * comment at the reference's to address
 	 */
 	public boolean hasReferencedRepeatable() {
 		return (displayCommentArrays[REF_REPEATABLES] != null) &&
@@ -143,10 +144,10 @@ public class DisplayableEol {
 	}
 
 	/**
-	 * Return whether this code unit has an automatic comment.
-	 * (i.e. any memory reference from this code unit has a
-	 * function defined at the reference's to address, or if the to
-	 * address is a pointer.)
+	 * Return whether this code unit has an automatic comment.  For example, a memory reference 
+	 * from this code unit has a function defined at the reference's to address, or if the to 
+	 * address is a pointer.
+	 * @return whether this code unit has an automatic comment 
 	 */
 	public boolean hasAutomatic() {
 		return (displayCommentArrays[MY_AUTOMATIC] != null) &&
@@ -367,6 +368,10 @@ public class DisplayableEol {
 	private boolean handleDirectFlow(Set<String> set, Reference reference, Program program,
 			Address toAddr) {
 
+		if (!showAutomaticFunctions) {
+			return false;
+		}
+
 		RefType type = reference.getReferenceType();
 		if (!type.isFlow()) {
 			return false;
@@ -537,7 +542,8 @@ public class DisplayableEol {
 	}
 
 	/**
-	 * Return all the comments (End of Line, Repeatable, Referenced Repeatables, and Referenced Data).
+	 * Return all the comments
+	 * @return the comments
 	 */
 	public String[] getComments() {
 		ArrayList<String> list = new ArrayList<>();
@@ -553,9 +559,9 @@ public class DisplayableEol {
 		if (alwaysShowRefRepeats || !(hasEol || hasRepeatable)) {
 			RefRepeatComment[] refRepeatComments =
 				(RefRepeatComment[]) displayCommentArrays[REF_REPEATABLES];
-			for (int j = 0; j < refRepeatComments.length; j++) {
+			for (RefRepeatComment refRepeatComment : refRepeatComments) {
 				// Address addr = refRepeatComments[j].getAddress();
-				list.addAll(Arrays.asList(refRepeatComments[j].getCommentLines()));
+				list.addAll(Arrays.asList(refRepeatComment.getCommentLines()));
 			}
 		}
 
@@ -620,8 +626,8 @@ public class DisplayableEol {
 	 */
 	public String[] getReferencedRepeatableComments(Address refAddress) {
 		Object[] refRepeatArray = displayCommentArrays[REF_REPEATABLES];
-		for (int i = 0; i < refRepeatArray.length; i++) {
-			RefRepeatComment refRepeatComment = (RefRepeatComment) refRepeatArray[i];
+		for (Object element : refRepeatArray) {
+			RefRepeatComment refRepeatComment = (RefRepeatComment) element;
 			if (refRepeatComment.getAddress().equals(refAddress)) {
 				return refRepeatComment.getCommentLines();
 			}
@@ -646,8 +652,8 @@ public class DisplayableEol {
 			case REF_REPEATABLES:
 				int count = 0;
 				Object[] refRepeatArray = displayCommentArrays[REF_REPEATABLES];
-				for (int i = 0; i < refRepeatArray.length; i++) {
-					count += ((RefRepeatComment) refRepeatArray[i]).getCommentLines().length;
+				for (Object element : refRepeatArray) {
+					count += ((RefRepeatComment) element).getCommentLines().length;
 				}
 				return count;
 			case MY_AUTOMATIC:
@@ -661,8 +667,8 @@ public class DisplayableEol {
 
 	public int getRefRepeatableCommentLineCount(Address refAddress) {
 		Object[] refRepeatArray = displayCommentArrays[REF_REPEATABLES];
-		for (int i = 0; i < refRepeatArray.length; i++) {
-			RefRepeatComment refRepeatComment = (RefRepeatComment) refRepeatArray[i];
+		for (Object element : refRepeatArray) {
+			RefRepeatComment refRepeatComment = (RefRepeatComment) element;
 			if (refRepeatComment.getAddress().equals(refAddress)) {
 				return refRepeatComment.getCommentLines().length;
 			}

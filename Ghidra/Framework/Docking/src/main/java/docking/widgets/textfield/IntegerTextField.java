@@ -15,19 +15,18 @@
  */
 package docking.widgets.textfield;
 
-import java.awt.*;
-import java.awt.event.*;
-import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
 
-import javax.swing.JComponent;
-import javax.swing.JTextField;
+import java.awt.*;
+import java.awt.event.*;
+import java.math.BigInteger;
+
+import javax.swing.*;
 import javax.swing.event.*;
 import javax.swing.text.*;
 
 import docking.DockingUtils;
-import docking.ToolTipManager;
 import docking.util.GraphicsUtils;
 import ghidra.util.SystemUtilities;
 
@@ -163,14 +162,15 @@ public class IntegerTextField {
 	 * <P> If using this method, it is highly recommended that you set the max value to {@link Integer#MAX_VALUE}
 	 * or lower.
 	 *
-	 * @return the current value as an int. Or 0 if there is no value.
+	 * @return the current value as an int. Or 0 if there is no value
+	 * @throws ArithmeticException if the value in this field will not fit into an int
 	 */
 	public int getIntValue() {
 		BigInteger currentValue = getValue();
 		if (currentValue == null) {
 			return 0;
 		}
-		return currentValue.intValue();
+		return currentValue.intValueExact();
 	}
 
 	/**
@@ -182,14 +182,15 @@ public class IntegerTextField {
 	 * <P> If using this method, it is highly recommended that you set the max value to {@link Long#MAX_VALUE}
 	 * or lower.
 	 *
-	 * @return the current value as a long. Or 0 if there is no value.
+	 * @return the current value as a long. Or 0 if there is no value
+	 * @throws ArithmeticException if the value in this field will not fit into a long
 	 */
 	public long getLongValue() {
 		BigInteger currentValue = getValue();
 		if (currentValue == null) {
 			return 0;
 		}
-		return currentValue.longValue();
+		return currentValue.longValueExact();
 	}
 
 	/**
@@ -370,6 +371,15 @@ public class IntegerTextField {
 	 */
 	public void setEnabled(boolean enabled) {
 		textField.setEnabled(enabled);
+	}
+
+	/**
+	 * Sets the editable mode for the JTextField component
+	 * 
+	 * @param editable boolean flag, if true component is editable
+	 */
+	public void setEditable(boolean editable) {
+		textField.setEditable(editable);
 	}
 
 	/**

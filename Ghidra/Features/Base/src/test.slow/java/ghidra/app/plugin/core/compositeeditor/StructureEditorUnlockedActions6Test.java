@@ -33,7 +33,9 @@ public class StructureEditorUnlockedActions6Test
 	public void testArrayOnArray() throws Exception {
 		init(complexStructure, pgmTestCat);
 		NumberInputDialog dialog;
-		model.clearComponent(16);
+		runSwing(() -> {
+			model.clearComponent(16);
+		});
 		int num = model.getNumComponents();
 
 		setSelection(new int[] { 15 });
@@ -41,7 +43,7 @@ public class StructureEditorUnlockedActions6Test
 		assertTrue(dt15 instanceof Array);
 
 		// Make array of 2 arrays
-		invoke(arrayAction);
+		invoke(arrayAction, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		okInput(dialog, 2);
@@ -58,7 +60,9 @@ public class StructureEditorUnlockedActions6Test
 	public void testArrayOnFixedDt() throws Exception {
 		init(simpleStructure, pgmBbCat);
 		NumberInputDialog dialog;
-		model.clearComponents(new int[] { 4, 5, 6 });
+		runSwing(() -> {
+			getModel().clearComponents(new int[] { 4, 5, 6 });
+		});
 		int num = model.getNumComponents();
 
 		setSelection(new int[] { 3 });
@@ -66,7 +70,7 @@ public class StructureEditorUnlockedActions6Test
 		assertEquals("dword", dt3.getDisplayName());
 
 		// Make array of 5 quadwords
-		invoke(arrayAction);
+		invoke(arrayAction, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		okInput(dialog, 5);
@@ -84,6 +88,7 @@ public class StructureEditorUnlockedActions6Test
 		init(emptyStructure, pgmRootCat);
 		int originalLength = 0;
 		assertTrue(emptyStructure.isNotYetDefined());
+		assertTrue(emptyStructure.isZeroLength());
 		int newLength = 5;
 
 		assertEquals(originalLength, model.getLength());
@@ -147,7 +152,7 @@ public class StructureEditorUnlockedActions6Test
 
 		assertEquals(0, model.getLength());
 		assertEquals(0, model.getNumComponents());
-		invoke(fav);
+		invoke(fav, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		okInput(dialog, 7);

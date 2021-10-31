@@ -65,13 +65,13 @@ public interface AddressMap {
 	/**
 	 * Search for addr within the "sorted" keyRangeList and return the index of the
 	 * keyRange which contains the specified addr.
-	 * @param keyRangeList
+	 * @param keyRangeList key range list to search
 	 * @param addr address or null
 	 * @return index of the keyRange within the keyRangeList which contains addr 
-	 * if it is contained in the list; otherwise, <tt>(-(<i>insertion point</i>) - 1)</tt>. 
+	 * if it is contained in the list; otherwise, <code>(-(<i>insertion point</i>) - 1)</code>. 
 	 * The <i>insertion point</i> is defined as the point at which the
 	 * addr would be inserted into the list: the index of the first keyRange
-	 * greater than addr, or <tt>keyRangeList.size()</tt>, if all
+	 * greater than addr, or <code>keyRangeList.size()</code>, if all
 	 * keyRanges in the list are less than the specified addr.  Note
 	 * that this guarantees that the return value will be &gt;= 0 if
 	 * and only if the addr is found within a keyRange.  
@@ -100,7 +100,7 @@ public interface AddressMap {
 	 * Generates a properly ordered list of database key ranges for a
 	 * a specified address set.  If absolute encodings are requested, 
 	 * only memory addresses will be included.
-	 * @param set address set or null for all real address.
+	 * @param set address set or null for all addresses.  May not be null if <code>create</code> is true.
 	 * @param create true if a new keys may be generated, otherwise returned 
 	 * key-ranges will be limited to those already defined.
 	 * @return "sorted" list of KeyRange objects
@@ -113,12 +113,14 @@ public interface AddressMap {
 	 * "absoluteEncoding" method.  If the program's default address space is segmented (i.e., SegmentedAddressSpace).
 	 * the address returned will be always be normalized to defined segmented memory blocks if possible.
 	 * @param value the long value to convert to an address.
+	 * @return address decoded from long 
 	 */
 	public Address decodeAddress(long value);
 
 	/**
 	 * Returns the address factory associated with this map.
 	 * Null may be returned if map not associated with a specific address factory.
+	 * @return associated {@link AddressFactory} or null
 	 */
 	public AddressFactory getAddressFactory();
 
@@ -140,7 +142,7 @@ public interface AddressMap {
 	 * Generates a properly ordered list of database key ranges for a
 	 * a specified address set.  If absolute encodings are requested, 
 	 * only memory addresses will be included.
-	 * @param set address set or null for all real address.
+	 * @param set address set or null for all addresses.  May not be null if <code>create</code> is true.
 	 * @param absolute if true, absolute key encodings are returned, otherwise 
 	 * standard/relocatable address key encodings are returned.
 	 * @param create true if a new keys may be generated, otherwise returned 

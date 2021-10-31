@@ -90,6 +90,8 @@ public abstract class AbstractGraphComponentPanel extends JPanel {
 
 	abstract Color getBackgroundColor();
 
+	abstract Color getSelectionColor();
+
 	abstract Color getUserDefinedColor();
 
 	abstract Color getDefaultBackgroundColor();
@@ -119,6 +121,8 @@ public abstract class AbstractGraphComponentPanel extends JPanel {
 
 	abstract ProgramSelection getProgramSelection();
 
+	abstract String getTextSelection();
+
 	abstract void setProgramHighlight(ProgramSelection highlight);
 
 	void setProgramLocation(ProgramLocation location) {
@@ -138,9 +142,6 @@ public abstract class AbstractGraphComponentPanel extends JPanel {
 		}
 
 		Component header = getHeader();
-		if (clickedComponent == null) {
-			return false;
-		}
 		return SwingUtilities.isDescendingFrom(clickedComponent, header);
 	}
 

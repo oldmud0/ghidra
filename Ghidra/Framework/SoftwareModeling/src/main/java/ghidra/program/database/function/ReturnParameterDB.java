@@ -59,9 +59,6 @@ public class ReturnParameterDB extends ParameterDB {
 		throw new UnsupportedOperationException();
 	}
 
-	/**
-	 * @see ghidra.program.database.function.model.Parameter#getOrdinal()
-	 */
 	@Override
 	public final int getOrdinal() {
 		return RETURN_ORIDINAL;
@@ -172,8 +169,10 @@ public class ReturnParameterDB extends ParameterDB {
 
 	@Override
 	public SourceType getSource() {
-		// VARDO: What source-type should be used ?
-		return function.getSymbol().getSource();
+		if (dataType == null || Undefined.isUndefined(dataType)) {
+			return SourceType.DEFAULT;
+		}
+		return function.getSignatureSource();
 	}
 
 	@Override

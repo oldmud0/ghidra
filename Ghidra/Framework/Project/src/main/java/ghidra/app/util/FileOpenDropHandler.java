@@ -1,6 +1,5 @@
 /* ###
  * IP: GHIDRA
- * REVIEWED: YES
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,16 +15,13 @@
  */
 package ghidra.app.util;
 
-import ghidra.framework.plugintool.PluginTool;
-import ghidra.util.CascadedDropTarget;
-
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.dnd.*;
 import java.awt.event.ContainerEvent;
 import java.awt.event.ContainerListener;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Set;
 
 import javax.swing.CellRendererPane;
@@ -33,6 +29,8 @@ import javax.swing.CellRendererPane;
 import docking.DropTargetHandler;
 import docking.dnd.DropTgtAdapter;
 import docking.dnd.Droppable;
+import ghidra.framework.plugintool.PluginTool;
+import ghidra.util.CascadedDropTarget;
 
 /**
  *  Handles drag/drop events on a given component such that a file
@@ -42,11 +40,10 @@ import docking.dnd.Droppable;
  *  in order to properly support drag/drop with all components.
  */
 public class FileOpenDropHandler implements DropTargetHandler, Droppable, ContainerListener {
-	private static HashMap<DataFlavor, FileOpenDataFlavorHandler> handlers =
-		new HashMap<DataFlavor, FileOpenDataFlavorHandler>();
-	static {
-		FileOpenDataFlavorHandlerService.registerDataFlavorHandlers();
-	}
+
+	// note: we wish to maintain insertion order
+	private static LinkedHashMap<DataFlavor, FileOpenDataFlavorHandler> handlers =
+		new LinkedHashMap<DataFlavor, FileOpenDataFlavorHandler>();
 
 	private DropTgtAdapter dropTargetAdapter;
 	private DropTarget globalDropTarget;
@@ -75,11 +72,13 @@ public class FileOpenDropHandler implements DropTargetHandler, Droppable, Contai
 	/**
 	 * Dispose this drop handler.
 	 */
+	@Override
 	public void dispose() {
 		deinitializeComponents(component);
 		globalDropTarget.removeDropTargetListener(dropTargetAdapter);
 	}
 
+	@Override
 	public boolean isDropOk(DropTargetDragEvent e) {
 		Set<DataFlavor> flavors = handlers.keySet();
 		for (DataFlavor dataFlavor : flavors) {
@@ -90,6 +89,7 @@ public class FileOpenDropHandler implements DropTargetHandler, Droppable, Contai
 		return false;
 	}
 
+	@Override
 	public void add(Object obj, DropTargetDropEvent e, DataFlavor f) {
 		FileOpenDataFlavorHandler handler = handlers.get(f);
 		if (handler != null) {
@@ -97,24 +97,28 @@ public class FileOpenDropHandler implements DropTargetHandler, Droppable, Contai
 		}
 	}
 
+	@Override
 	public void dragUnderFeedback(boolean ok, DropTargetDragEvent e) {
 		// nothing to display or do
 	}
 
+	@Override
 	public void undoDragUnderFeedback() {
 		// nothing to display or do
 	}
 
 	private void initializeComponents(Component comp) {
-		if (comp instanceof CellRendererPane)
+		if (comp instanceof CellRendererPane) {
 			return;
+		}
 
 		if (comp instanceof Container) {
 			Container c = (Container) comp;
 			c.addContainerListener(this);
 			Component comps[] = c.getComponents();
-			for (Component element : comps)
+			for (Component element : comps) {
 				initializeComponents(element);
+			}
 		}
 		DropTarget primaryDropTarget = comp.getDropTarget();
 		if (primaryDropTarget != null) {
@@ -123,15 +127,17 @@ public class FileOpenDropHandler implements DropTargetHandler, Droppable, Contai
 	}
 
 	private void deinitializeComponents(Component comp) {
-		if (comp instanceof CellRendererPane)
+		if (comp instanceof CellRendererPane) {
 			return;
+		}
 
 		if (comp instanceof Container) {
 			Container c = (Container) comp;
 			c.removeContainerListener(this);
 			Component comps[] = c.getComponents();
-			for (Component element : comps)
+			for (Component element : comps) {
 				deinitializeComponents(element);
+			}
 		}
 		DropTarget dt = comp.getDropTarget();
 		if (dt instanceof CascadedDropTarget) {
@@ -141,15 +147,18 @@ public class FileOpenDropHandler implements DropTargetHandler, Droppable, Contai
 		}
 	}
 
+	@Override
 	public void componentAdded(ContainerEvent e) {
 		initializeComponents(e.getChild());
 	}
 
+	@Override
 	public void componentRemoved(ContainerEvent e) {
 		deinitializeComponents(e.getChild());
 	}
 
-	public static void addDataFlavorHandler(DataFlavor dataFlavor, FileOpenDataFlavorHandler handler) {
+	public static void addDataFlavorHandler(DataFlavor dataFlavor,
+			FileOpenDataFlavorHandler handler) {
 		handlers.put(dataFlavor, handler);
 	}
 

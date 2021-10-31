@@ -25,10 +25,9 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import ghidra.program.model.data.*;
-import ghidra.program.model.data.Composite.AlignmentType;
 import ghidra.util.exception.DuplicateNameException;
 import ghidra.util.exception.UsrException;
-import ghidra.util.task.TaskMonitorAdapter;
+import ghidra.util.task.TaskMonitor;
 
 public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 
@@ -39,7 +38,7 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 		try {
 			DataTypeManager dataTypeManager = cat.getDataTypeManager();
 			if (dt.getDataTypeManager() != dataTypeManager) {
-				dt = (Union) dt.clone(dataTypeManager);
+				dt = dt.clone(dataTypeManager);
 			}
 			CategoryPath categoryPath = cat.getCategoryPath();
 			if (!dt.getCategoryPath().equals(categoryPath)) {
@@ -60,10 +59,8 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 			installProvider(new UnionEditorProvider(plugin, unionDt, showInHex));
 			model = provider.getModel();
 		});
-		assertIsInternallyAligned(false);
-		assertPackingValue(Composite.NOT_PACKING);
-		assertMinimumAlignmentType(AlignmentType.DEFAULT_ALIGNED);
-		assertMinimumAlignmentValue(Composite.DEFAULT_ALIGNMENT_VALUE);
+		assertIsPackingEnabled(false);
+		assertIsDefaultAligned();
 		assertActualAlignment(1);
 		startTransaction("Modify Program");
 	}
@@ -85,7 +82,7 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 			init(complexUnion, pgmTestCat, false);
 
 			assertEquals("/aa/bb", getDataType(20).getCategoryPath().getPath());
-			pgmTestCat.moveCategory(pgmBbCat, TaskMonitorAdapter.DUMMY_MONITOR);
+			pgmTestCat.moveCategory(pgmBbCat, TaskMonitor.DUMMY);
 			waitForSwing();
 			assertEquals("/testCat/bb", getDataType(20).getCategoryPath().getPath());
 		}
@@ -100,7 +97,7 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 			init(simpleUnion, pgmBbCat, false);
 
 			assertEquals(pgmBbCat.getCategoryPathName(), model.getOriginalCategoryPath().getPath());
-			pgmTestCat.moveCategory(pgmBbCat, TaskMonitorAdapter.DUMMY_MONITOR);
+			pgmTestCat.moveCategory(pgmBbCat, TaskMonitor.DUMMY);
 			waitForSwing();
 			assertTrue(model.getOriginalCategoryPath().getPath().startsWith(
 				pgmTestCat.getCategoryPathName()));
@@ -118,11 +115,16 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 
 	@Test
 	public void testEditedDtCategoryRemoved() throws Exception {
+
+		DataTypeManager dtm = complexUnion.getDataTypeManager();
+		Union refUnion = (Union) dtm.getDataType("/testCat/refUnion");
+		assertNotNull(refUnion);
+
 		Category tempCat;
 		try {
 			startTransaction("Modify Program");
 			tempCat = pgmRootCat.createCategory("Temp");
-			tempCat.moveDataType(complexUnion, DataTypeConflictHandler.DEFAULT_HANDLER);
+			tempCat.moveDataType(refUnion, DataTypeConflictHandler.DEFAULT_HANDLER);
 		}
 		finally {
 			endTransaction(true);
@@ -136,13 +138,13 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 			DataType dt18 = getDataType(18).clone(programDTM);
 			DataType dt20 = getDataType(20).clone(programDTM);
 			SwingUtilities.invokeLater(() -> {
-				programDTM.remove(complexUnion, TaskMonitorAdapter.DUMMY_MONITOR);
+				programDTM.remove(complexUnion, TaskMonitor.DUMMY);
 				programDTM.getCategory(pgmRootCat.getCategoryPath()).removeCategory("Temp",
-					TaskMonitorAdapter.DUMMY_MONITOR);
+					TaskMonitor.DUMMY);
 			});
 
 			waitForSwing();
-			// refUnion* gets removed since it has only a complexUnion* that was removed.
+			// refUnion* gets removed
 			assertEquals(num - 1, model.getNumComponents());
 			assertTrue(dt18.isEquivalent(getDataType(18)));
 			assertTrue(dt20.isEquivalent(getDataType(19)));
@@ -244,7 +246,7 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 			DataType origCopy = complexUnion.clone(null);
 
 			// Verify the Reload Union Editor? dialog is displayed.
-			dialog = env.waitForWindow("Reload Union Editor?", 1000);
+			dialog = waitForWindow("Reload Union Editor?");
 			assertNotNull(dialog);
 			pressButtonByText(dialog, "Yes");
 			dialog.dispose();
@@ -281,7 +283,7 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 			waitForSwing();
 
 			// Verify the Reload Union Editor? dialog is displayed.
-			dialog = env.waitForWindow("Reload Union Editor?", 1000);
+			dialog = waitForWindow("Reload Union Editor?");
 			assertNotNull(dialog);
 			pressButtonByText(dialog, "No");
 			dialog.dispose();
@@ -368,7 +370,7 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 
 			assertEquals(21, model.getNumComponents());
 			SwingUtilities.invokeLater(() -> complexUnion.getDataTypeManager().remove(
-				simpleStructure, TaskMonitorAdapter.DUMMY_MONITOR));
+				simpleStructure, TaskMonitor.DUMMY));
 			waitForSwing();
 			assertEquals(15, model.getNumComponents());
 		}
@@ -394,7 +396,7 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 			assertTrue(simpleUnion.isEquivalent(getDataType(0)));
 
 			SwingUtilities.invokeLater(() -> simpleUnion.getDataTypeManager().remove(simpleUnion,
-				TaskMonitorAdapter.DUMMY_MONITOR));
+				TaskMonitor.DUMMY));
 			waitForSwing();
 			assertEquals(0, model.getNumComponents());
 		}
@@ -409,16 +411,31 @@ public class UnionEditorNotifiedTest extends AbstractUnionEditorTest {
 			init(complexUnion, pgmTestCat, false);
 
 			int num = model.getNumComponents();
+
 			// Clone the data types we want to hold onto for comparison later, since reload can close the viewDTM.
 			DataType dt18 = getDataType(18).clone(programDTM);
 			DataType dt20 = getDataType(20).clone(programDTM);
-			SwingUtilities.invokeLater(() -> complexUnion.getDataTypeManager().remove(complexUnion,
-				TaskMonitorAdapter.DUMMY_MONITOR));
+
+			DataTypeManager dtm = complexUnion.getDataTypeManager();
+			Union refUnion = (Union) dtm.getDataType("/testCat/refUnion");
+			assertNotNull(refUnion);
+
+			SwingUtilities.invokeLater(() -> dtm.remove(refUnion, TaskMonitor.DUMMY)); // remove refUnion
 			waitForSwing();
-			// refUnion* gets removed since it has only a complexUnion* that was removed.
-			assertEquals(num - 1, model.getNumComponents());
+
+			// refUnion* gets removed (1 component)
+			num -= 1;
+			assertEquals(num, model.getNumComponents());
 			assertTrue(dt18.isEquivalent(getDataType(18)));
 			assertTrue(dt20.isEquivalent(getDataType(19)));
+
+			SwingUtilities.invokeLater(
+				() -> simpleUnion.getDataTypeManager().remove(simpleUnion, TaskMonitor.DUMMY));
+			waitForSwing();
+
+			// All components (3 total) which were dependent upon simpleUnion are removed
+			num -= 3;
+			assertEquals(num, model.getNumComponents());
 		}
 		finally {
 			cleanup();

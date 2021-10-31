@@ -87,11 +87,11 @@ public:
 };
 
 class PcodeInjectLibrarySleigh : public PcodeInjectLibrary {
-  Architecture *glb;
   const SleighBase *slgh;
   vector<OpBehavior *> inst;
   InjectContextSleigh contextCache;
   int4 registerDynamicInject(InjectPayload *payload);
+  InjectPayloadDynamic *forceDebugDynamic(int4 injectid);
   void parseInject(InjectPayload *payload);
 protected:
   virtual int4 allocateInject(const string &sourceName,const string &name,int4 type);

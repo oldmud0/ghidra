@@ -163,16 +163,18 @@
 
 :rfci				is $(NOTVLE) & OP=19 & BITS_21_25=0 & BITS_16_20=0 & BITS_11_15=0 & XOP_1_10=51 & BIT_0=0
 {
-	returnFromCriticalInterrupt();
-	return[SRR0]; 
+	MSR = returnFromCriticalInterrupt(MSR, CSRR1);
+	local ra = CSRR0;
+	return[ra];
 
 }
 
 #rfi	0x4c 00 00 64 
 :rfi		is $(NOTVLE) & OP=19 & BITS_11_25=0 & XOP_1_10=50 & BIT_0=0	
 { 
-	returnFromInterrupt();  
-	return[SRR0]; 
+	MSR = returnFromInterrupt(MSR, SRR1);
+	local ra = SRR0;
+	return[ra];
 }
 
 
@@ -211,7 +213,7 @@
 }
 
 #wrteei 0       0x7c 00 01 46
-:wrteei BIT_16	is OP=31 & BIT_16 & XOP_1_10=163
+:wrteei BIT_15	is OP=31 & BIT_15 & XOP_1_10=163
 {
-	WriteExternalEnableImmediate(BIT_16:1);
+	WriteExternalEnableImmediate(BIT_15:1);
 }

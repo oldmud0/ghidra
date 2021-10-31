@@ -78,6 +78,19 @@ public class ReadOnlyDataTypeComponent implements DataTypeComponent, Serializabl
 		return false; // Unsupported use
 	}
 
+	@Override
+	public boolean isBitFieldComponent() {
+		return dataType instanceof BitFieldDataType;
+	}
+
+	@Override
+	public boolean isZeroBitFieldComponent() {
+		if (dataType instanceof BitFieldDataType) {
+			return ((BitFieldDataType) dataType).getBitSize() == 0;
+		}
+		return false;
+	}
+
 	/**
 	 * @see ghidra.program.model.data.DataTypeComponent#getOffset()
 	 */
@@ -235,7 +248,7 @@ public class ReadOnlyDataTypeComponent implements DataTypeComponent, Serializabl
 		int otherLength = dtc.getLength();
 		DataType myParent = getParent();
 		boolean aligned =
-			(myParent instanceof Composite) ? ((Composite) myParent).isInternallyAligned() : false;
+			(myParent instanceof Composite) ? ((Composite) myParent).isPackingEnabled() : false;
 		// Components don't need to have matching offset when they are aligned, only matching ordinal.
 		if ((!aligned && (offset != dtc.getOffset())) ||
 			// Components don't need to have matching length when they are aligned. Is this correct?

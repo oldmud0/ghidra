@@ -20,19 +20,21 @@ import static org.junit.Assert.*;
 import java.awt.Rectangle;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
-import java.util.List;
+import java.util.Set;
 
 import javax.swing.*;
 import javax.swing.table.*;
 
 import org.junit.*;
 
+import docking.DockingWindowManager;
 import docking.KeyEntryTextField;
 import docking.action.DockingActionIf;
+import docking.tool.util.DockingToolConstants;
 import docking.widgets.MultiLineLabel;
+import generic.test.TestUtils;
 import ghidra.app.plugin.core.codebrowser.CodeBrowserPlugin;
 import ghidra.framework.plugintool.PluginTool;
-import ghidra.framework.plugintool.util.ToolConstants;
 import ghidra.test.AbstractGhidraHeadedIntegrationTest;
 import ghidra.test.TestEnv;
 import ghidra.util.Msg;
@@ -89,26 +91,44 @@ public class KeyBindingsTest extends AbstractGhidraHeadedIntegrationTest {
 		// look for the info panel
 		MultiLineLabel label = findComponent(panel, MultiLineLabel.class);
 		String str = "To add or change a key binding, select an action\n" +
-			" and type any key combination.\n" + "To remove a key binding, select an action and\n" +
-			"press <Enter> or <Backspace>.";
+			"and type any key combination\n" +
+			" \n" +
+			"To remove a key binding, select an action and\n" +
+			"press <Enter> or <Backspace>";
 
 		assertEquals(str, label.getLabel());
 
 		//  verify that the description is displayed for the selected action
 
 		selectRowForAction(action1);
-		assertTrue(statusPane.getText().indexOf(action1.getDescription()) != -1);
+
+		String actualText = getText(statusPane);
+		String description = action1.getDescription();
+		String escaped = description.replaceAll("&", "&amp;");
+		assertTrue(
+			"Description is not updated for action '" + action1.getName() + "'; instead the " +
+				"description is '" + actualText + "'\n\tDescrption: " + escaped,
+			actualText.indexOf(escaped) != -1);
 	}
 
 	@Test
 	public void testManagedKeyBindings() {
-		List<DockingActionIf> list = tool.getAllActions();
-		for (int i = 0; i < list.size(); i++) {
-			DockingActionIf action = list.get(i);
-			if (action.isKeyBindingManaged()) {
-				assertTrue(actionInTable(action));
+		Set<DockingActionIf> list = tool.getAllActions();
+		for (DockingActionIf action : list) {
+			if (!ignoreAction(action)) {
+				boolean inTable = actionInKeyBindingsTable(action);
+				assertTrue("Action should be in the key bindingds table: " + action.getFullName(),
+					inTable);
 			}
 		}
+	}
+
+	private boolean ignoreAction(DockingActionIf action) {
+		if (!action.getKeyBindingType().isManaged()) {
+			return true;
+		}
+
+		return action.getFullName().contains("Table Data");
 	}
 
 	@Test
@@ -128,12 +148,10 @@ public class KeyBindingsTest extends AbstractGhidraHeadedIntegrationTest {
 	@Test
 	public void testActionNotSelected() throws Exception {
 		table.clearSelection();
-		List<DockingActionIf> list = tool.getAllActions();
-		DockingActionIf action = null;
-		for (int i = 0; i < list.size(); i++) {
-			action = list.get(i);
+		Set<DockingActionIf> list = tool.getAllActions();
+		for (DockingActionIf action : list) {
 			KeyStroke ks = getKeyStroke(action);
-			if (isKeyBindingManaged(action) && ks != KeyStroke.getKeyStroke(KeyEvent.VK_Z, 0)) {
+			if (supportsKeyBindings(action) && ks != KeyStroke.getKeyStroke(KeyEvent.VK_Z, 0)) {
 				break;
 			}
 		}
@@ -215,6 +233,44 @@ public class KeyBindingsTest extends AbstractGhidraHeadedIntegrationTest {
 
 		apply();
 		assertEquals(KeyStroke.getKeyStroke(KeyEvent.VK_PAGE_UP, 0), getKeyStroke(action1));
+	}
+
+	@Test
+	public void testSetKeyBinding_AltGraphFix() throws Exception {
+
+		//
+		// This test is verifying a hack that was put in to fix the difference in 'Alt' key handling
+		// on Windows (https://bugs.openjdk.java.net/browse/JDK-8194873).  
+		// Create an action and set the keybinding to use the 'Alt' modifier.  
+		// Verify that the action will also get mapped to the 'Alt Graph' modifier.  
+		//
+
+		// verify that no action is mapped to the new binding
+		int keyCode = KeyEvent.VK_0;
+		int modifiers = InputEvent.ALT_DOWN_MASK | InputEvent.ALT_GRAPH_DOWN_MASK;
+		KeyEvent keyEvent =
+			new KeyEvent(dialog, KeyEvent.KEY_PRESSED, System.currentTimeMillis(), modifiers,
+				keyCode, KeyEvent.CHAR_UNDEFINED);
+		KeyStroke keyStroke = KeyStroke.getKeyStrokeForEvent(keyEvent);
+		DockingWindowManager dwm = DockingWindowManager.getActiveInstance();
+		Action action =
+			(Action) TestUtils.invokeInstanceMethod("getActionForKeyStroke", dwm, keyStroke);
+		assertNull(action);
+
+		// set the new binding that uses the 'Alt' key
+		selectRowForAction(action1);
+		triggerActionKey(keyField, InputEvent.ALT_DOWN_MASK, keyCode);
+		String keyStrokeString = KeyEntryTextField.parseKeyStroke(
+			KeyStroke.getKeyStroke(keyCode, InputEvent.ALT_DOWN_MASK));
+		assertEquals(keyStrokeString, keyField.getText());
+		apply();
+		assertEquals(KeyStroke.getKeyStroke(keyCode, InputEvent.ALT_DOWN_MASK),
+			getKeyStroke(action1));
+
+		// verify the additional binding for 'Alt Graph'
+		action =
+			(Action) TestUtils.invokeInstanceMethod("getActionForKeyStroke", dwm, keyStroke);
+		assertNotNull(action);
 	}
 
 	@Test
@@ -313,17 +369,15 @@ public class KeyBindingsTest extends AbstractGhidraHeadedIntegrationTest {
 		waitForSwing();
 	}
 
-	private boolean isKeyBindingManaged(DockingActionIf action) {
-		return action.isKeyBindingManaged();
+	private boolean supportsKeyBindings(DockingActionIf action) {
+		return ignoreAction(action);
 	}
 
 	private DockingActionIf getKeyBindingPluginAction() {
-		List<DockingActionIf> list = tool.getAllActions();
-		DockingActionIf action = null;
-		for (int i = 0; i < list.size(); i++) {
-			action = list.get(i);
+		Set<DockingActionIf> list = tool.getAllActions();
+		for (DockingActionIf action : list) {
 			KeyStroke ks = action.getKeyBinding();
-			if (action.isKeyBindingManaged() && ks != null &&
+			if (ignoreAction(action) && ks != null &&
 				ks != KeyStroke.getKeyStroke(KeyEvent.VK_Z, 0)) {
 				return action;
 			}
@@ -331,7 +385,7 @@ public class KeyBindingsTest extends AbstractGhidraHeadedIntegrationTest {
 		return null;
 	}
 
-	private boolean actionInTable(DockingActionIf action) {
+	private boolean actionInKeyBindingsTable(DockingActionIf action) {
 		String actionName = action.getName();
 		KeyStroke ks = action.getKeyBinding();
 
@@ -364,6 +418,7 @@ public class KeyBindingsTest extends AbstractGhidraHeadedIntegrationTest {
 				return;
 			}
 		}
+		waitForSwing();
 	}
 
 	private KeyStroke getKeyStroke(DockingActionIf action) {
@@ -372,16 +427,15 @@ public class KeyBindingsTest extends AbstractGhidraHeadedIntegrationTest {
 
 	private void setUpDialog() throws Exception {
 		runSwing(() -> {
-			panel = new KeyBindingsPanel(tool, tool.getOptions(ToolConstants.KEY_BINDINGS));
+			panel = new KeyBindingsPanel(tool, tool.getOptions(DockingToolConstants.KEY_BINDINGS));
+			panel.setOptionsPropertyChangeListener(evt -> {
+				// stub
+			});
 
 			dialog = new JDialog(tool.getToolFrame(), "Test KeyBindings", false);
 			dialog.getContentPane().add(panel);
 			dialog.pack();
 			dialog.setVisible(true);
-			// set the dialog so that the panel can enable the apply button
-			panel.setOptionsPropertyChangeListener(evt -> {
-				// stub
-			});
 		});
 		table = findComponent(panel, JTable.class);
 		keyField = findComponent(panel, JTextField.class);
@@ -390,23 +444,26 @@ public class KeyBindingsTest extends AbstractGhidraHeadedIntegrationTest {
 		model = table.getModel();
 	}
 
+	// find 2 actions that do not have key bindings so that we can add and change the values
 	private void grabActionsWithoutKeybinding() {
-		List<DockingActionIf> list = tool.getAllActions();
-		DockingActionIf action = null;
-		for (int i = 0; i < list.size(); i++) {
-			action = list.get(i);
-			if (!action.isKeyBindingManaged()) {
+		Set<DockingActionIf> list = tool.getAllActions();
+		for (DockingActionIf action : list) {
+			if (ignoreAction(action)) {
 				continue;
 			}
 			if (action.getKeyBinding() != null) {
 				continue;
 			}
 
-			// good action
 			if (action1 == null) {
 				action1 = action;
 			}
 			else {
+
+				if (action.getName().equals(action1.getName())) {
+					continue; // same name, different owners; these are 'shared' actions--ignore
+				}
+
 				action2 = action;
 				return; // grabbed all actions--we are done
 			}

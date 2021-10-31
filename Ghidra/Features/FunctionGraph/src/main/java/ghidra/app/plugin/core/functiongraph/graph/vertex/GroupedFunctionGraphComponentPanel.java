@@ -39,6 +39,7 @@ import ghidra.util.*;
 import ghidra.util.exception.AssertException;
 import ghidra.util.layout.VerticalLayout;
 import resources.ResourceManager;
+import util.CollectionUtils;
 
 /**
  * This panel looks similar in appearance to the LisGraphComponentPanel, with a header, actions 
@@ -381,6 +382,7 @@ public class GroupedFunctionGraphComponentPanel extends AbstractGraphComponentPa
 	}
 
 	private void doSetBackgroundColor(Color color) {
+		setBackground(color);
 		contentPanel.setBackground(color);
 		userTextArea.setBackground(color);
 		controller.removeColor(vertex);
@@ -412,6 +414,13 @@ public class GroupedFunctionGraphComponentPanel extends AbstractGraphComponentPa
 			return userDefinedColor;
 		}
 		return defaultBackgroundColor;
+	}
+
+	@Override
+	Color getSelectionColor() {
+		Set<FGVertex> vertices = groupVertex.getVertices();
+		FGVertex v = CollectionUtils.any(vertices);
+		return v.getSelectionColor();
 	}
 
 	@Override
@@ -531,6 +540,11 @@ public class GroupedFunctionGraphComponentPanel extends AbstractGraphComponentPa
 	}
 
 	@Override
+	String getTextSelection() {
+		return null; // can't select text in a group vertex
+	}
+
+	@Override
 	void setProgramHighlight(ProgramSelection highlight) {
 		Set<FGVertex> vertices = groupVertex.getVertices();
 		for (FGVertex v : vertices) {
@@ -553,9 +567,23 @@ public class GroupedFunctionGraphComponentPanel extends AbstractGraphComponentPa
 
 	@Override
 	void refreshDisplay() {
+
+		updateDefaultBackgroundColor();
+
 		Set<FGVertex> vertices = groupVertex.getVertices();
 		for (FGVertex v : vertices) {
 			v.refreshDisplay();
+		}
+	}
+
+	private void updateDefaultBackgroundColor() {
+		FunctionGraphOptions options = controller.getFunctionGraphOptions();
+		Color newBgColor = options.getDefaultGroupBackgroundColor();
+		if (!defaultBackgroundColor.equals(newBgColor)) {
+			defaultBackgroundColor = newBgColor;
+			if (userDefinedColor == null) {
+				doSetBackgroundColor(defaultBackgroundColor);
+			}
 		}
 	}
 

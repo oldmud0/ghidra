@@ -43,10 +43,6 @@ public class OptionsTest extends AbstractGenericTest {
 
 	private ToolOptions options;
 
-	public OptionsTest() {
-		super();
-	}
-
 	@Before
 	public void setUp() throws Exception {
 		options = new ToolOptions("Test");
@@ -623,7 +619,7 @@ public class OptionsTest extends AbstractGenericTest {
 
 		@Override
 		public int hashCode() {
-			return 1;// set so that this listener gets called after the storingOptionsListnere
+			return 1;// set so that this listener gets called after the storingOptionsListener
 		}
 	}
 

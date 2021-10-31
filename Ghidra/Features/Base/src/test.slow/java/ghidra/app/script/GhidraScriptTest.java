@@ -44,17 +44,13 @@ import ghidra.test.AbstractGhidraHeadedIntegrationTest;
 import ghidra.test.TestEnv;
 import ghidra.util.Msg;
 import ghidra.util.exception.AssertException;
-import ghidra.util.task.TaskMonitorAdapter;
+import ghidra.util.task.TaskMonitor;
 
 public class GhidraScriptTest extends AbstractGhidraHeadedIntegrationTest {
 
 	private TestEnv env;
 	private Program program;
 	private GhidraState state;
-
-	public GhidraScriptTest() {
-		super();
-	}
 
 	@Before
 	public void setUp() throws Exception {
@@ -522,8 +518,10 @@ public class GhidraScriptTest extends AbstractGhidraHeadedIntegrationTest {
 		// Try to set a valid option to an invalid value and verify that the invalid value was not stored.
 		String invalidValue = "d";
 		script.setAnalysisOption(program, validOptionName, invalidValue);
-		assertFalse(script.getCurrentAnalysisOptionsAndValues(program).get(validOptionName).equals(
-			invalidValue));
+		assertFalse(script.getCurrentAnalysisOptionsAndValues(program)
+				.get(validOptionName)
+				.equals(
+					invalidValue));
 
 		// Try to set an invalid option and verify that the option is not successfully set.
 		String invalidOption = "invalidOption";
@@ -666,7 +664,6 @@ public class GhidraScriptTest extends AbstractGhidraHeadedIntegrationTest {
 		assertEquals(values.size(), userChoices.size());
 	}
 
-	@SuppressWarnings("deprecation")
 	@Test
 	public void testAskChoices_NoSharedInterface_ChooseMultiple_Deprecated() throws Exception {
 
@@ -674,13 +671,13 @@ public class GhidraScriptTest extends AbstractGhidraHeadedIntegrationTest {
 
 		final GhidraScript script = getScript();
 
-		Object[] values = { new JPanel(), new String() };
-		String[] labels = { "Panel", "String" };
+		List<Object> values = Arrays.asList(new JPanel(), new String());
+		List<String> labels = Arrays.asList("Panel", "String");
 
-		AtomicReference<Object[]> ref = new AtomicReference<>();
+		AtomicReference<List<Object>> ref = new AtomicReference<>();
 		runSwing(() -> {
 			try {
-				Object[] userChoices =
+				List<Object> userChoices =
 					script.askChoices("Ask Choices Test", "Pick", values, labels);
 				ref.set(userChoices);
 			}
@@ -689,16 +686,15 @@ public class GhidraScriptTest extends AbstractGhidraHeadedIntegrationTest {
 			}
 		}, false);
 
-		MultipleOptionsDialog<?> dialog = waitForDialogComponent(env.getTool().getToolFrame(),
-			MultipleOptionsDialog.class, DEFAULT_WINDOW_TIMEOUT);
+		MultipleOptionsDialog<?> dialog = waitForDialogComponent(MultipleOptionsDialog.class);
 		assertNotNull(dialog);
 		pressSelectAll(dialog);
 		pressButtonByText(dialog, "OK");
 
 		waitForSwing();
 
-		Object[] userChoices = ref.get();
-		assertEquals(values.length, userChoices.length);
+		List<Object> userChoices = ref.get();
+		assertEquals(values.size(), userChoices.size());
 	}
 
 	@Test
@@ -777,7 +773,7 @@ public class GhidraScriptTest extends AbstractGhidraHeadedIntegrationTest {
 				// test stub
 			}
 		};
-		script.set(state, TaskMonitorAdapter.DUMMY_MONITOR, null);
+		script.set(state, TaskMonitor.DUMMY, null);
 		return script;
 	}
 
@@ -828,7 +824,7 @@ public class GhidraScriptTest extends AbstractGhidraHeadedIntegrationTest {
 
 //==================================================================================================
 // Inner Classes
-//==================================================================================================	
+//==================================================================================================
 
 	public enum TestEnum {
 		a, b, c

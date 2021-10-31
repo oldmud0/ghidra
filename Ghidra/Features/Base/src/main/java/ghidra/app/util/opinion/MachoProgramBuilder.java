@@ -16,20 +16,22 @@
 package ghidra.app.util.opinion;
 
 import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
-import ghidra.app.util.MemoryBlockUtil;
+import ghidra.app.util.MemoryBlockUtils;
 import ghidra.app.util.bin.ByteProvider;
 import ghidra.app.util.bin.StructConverter;
 import ghidra.app.util.bin.format.macho.*;
 import ghidra.app.util.bin.format.macho.commands.*;
 import ghidra.app.util.bin.format.macho.commands.dyld.*;
+import ghidra.app.util.bin.format.macho.relocation.*;
 import ghidra.app.util.bin.format.macho.threadcommand.ThreadCommand;
 import ghidra.app.util.bin.format.objectiveC.ObjectiveC1_Constants;
-import ghidra.app.util.importer.*;
+import ghidra.app.util.importer.MessageLog;
+import ghidra.app.util.importer.MessageLogContinuesFactory;
 import ghidra.framework.options.Options;
 import ghidra.program.database.function.OverlappingFunctionException;
+import ghidra.program.database.mem.FileBytes;
 import ghidra.program.model.address.*;
 import ghidra.program.model.data.*;
 import ghidra.program.model.lang.Processor;
@@ -39,9 +41,9 @@ import ghidra.program.model.mem.*;
 import ghidra.program.model.reloc.RelocationTable;
 import ghidra.program.model.symbol.*;
 import ghidra.program.model.util.CodeUnitInsertionException;
-import ghidra.util.*;
-import ghidra.util.exception.DuplicateNameException;
-import ghidra.util.exception.InvalidInputException;
+import ghidra.util.Msg;
+import ghidra.util.NumericUtilities;
+import ghidra.util.exception.*;
 import ghidra.util.task.TaskMonitor;
 
 /**
@@ -55,32 +57,32 @@ public class MachoProgramBuilder {
 
 	protected Program program;
 	protected ByteProvider provider;
+	protected FileBytes fileBytes;
 	protected MessageLog log;
 	protected TaskMonitor monitor;
 	protected Memory memory;
 	protected Listing listing;
 	protected AddressSpace space;
-	protected MemoryBlockUtil mbu;
 
 	/**
 	 * Creates a new {@link MachoProgramBuilder} based on the given information.
 	 * 
 	 * @param program The {@link Program} to build up.
 	 * @param provider The {@link ByteProvider} that contains the Mach-O's bytes.
+	 * @param fileBytes Where the Mach-O's bytes came from.
 	 * @param log The log.
-	 * @param memoryConflictHandler How to handle memory conflicts that may occur.
 	 * @param monitor A cancelable task monitor.
 	 */
-	protected MachoProgramBuilder(Program program, ByteProvider provider, MessageLog log,
-			MemoryConflictHandler memoryConflictHandler, TaskMonitor monitor) {
+	protected MachoProgramBuilder(Program program, ByteProvider provider, FileBytes fileBytes,
+			MessageLog log, TaskMonitor monitor) {
 		this.program = program;
 		this.provider = provider;
+		this.fileBytes = fileBytes;
 		this.log = log;
 		this.monitor = monitor;
 		this.memory = program.getMemory();
 		this.listing = program.getListing();
 		this.space = program.getAddressFactory().getDefaultAddressSpace();
-		this.mbu = new MemoryBlockUtil(program, memoryConflictHandler);
 	}
 
 	/**
@@ -88,15 +90,15 @@ public class MachoProgramBuilder {
 	 * 
 	 * @param program The {@link Program} to build up.
 	 * @param provider The {@link ByteProvider} that contains the Mach-O's bytes.
+	 * @param fileBytes Where the Mach-O's bytes came from.
 	 * @param log The log.
-	 * @param memoryConflictHandler How to handle memory conflicts that may occur.
 	 * @param monitor A cancelable task monitor.
 	 * @throws Exception if a problem occurs.
 	 */
-	public static void buildProgram(Program program, ByteProvider provider, MessageLog log,
-			MemoryConflictHandler memoryConflictHandler, TaskMonitor monitor) throws Exception {
+	public static void buildProgram(Program program, ByteProvider provider, FileBytes fileBytes,
+			MessageLog log, TaskMonitor monitor) throws Exception {
 		MachoProgramBuilder machoProgramBuilder =
-			new MachoProgramBuilder(program, provider, log, memoryConflictHandler, monitor);
+			new MachoProgramBuilder(program, provider, fileBytes, log, monitor);
 		machoProgramBuilder.build();
 	}
 
@@ -106,42 +108,27 @@ public class MachoProgramBuilder {
 		monitor.setCancelEnabled(false);
 		machoHeader = MachHeader.createMachHeader(MessageLogContinuesFactory.create(log), provider);
 		machoHeader.parse();
-		Address headerAddr = null;
-		for (SegmentCommand segment : machoHeader.getAllSegments()) {
-			if (segment.getFileOffset() == 0 && segment.getFileSize() > 0) {
-				headerAddr = space.getAddress(segment.getVMaddress());
-				break;
-			}
-		}
 		monitor.setCancelEnabled(true);
 
-		try {
-			setImageBase();
-			processEntryPoint();
-			processMemoryBlocks(machoHeader, provider.getName(), true);
-			processUnsupportedLoadCommands();
-			processSymbolTables();
-			processIndirectSymbols();
-			setRelocatableProperty();
-			processLibraries();
-			processProgramDescription();
-			renameObjMsgSendRtpSymbol();
-			processUndefinedSymbols();
-			processAbsoluteSymbols();
-			processDyldInfo();
-			markupHeaders(machoHeader, headerAddr);
-			markupSections();
-			processProgramVars();
-			loadSectionRelocations();
-			loadExternalRelocations();
-			loadLocalRelocations();
-		}
-		finally {
-			if (mbu != null) {
-				mbu.dispose();
-				mbu = null;
-			}
-		}
+		setImageBase();
+		processEntryPoint();
+		processMemoryBlocks(machoHeader, provider.getName(), true, true);
+		processUnsupportedLoadCommands();
+		processSymbolTables();
+		processIndirectSymbols();
+		setRelocatableProperty();
+		processLibraries();
+		processProgramDescription();
+		renameObjMsgSendRtpSymbol();
+		processUndefinedSymbols();
+		processAbsoluteSymbols();
+		processDyldInfo();
+		markupHeaders(machoHeader, setupHeaderAddr(machoHeader.getAllSegments()));
+		markupSections();
+		processProgramVars();
+		loadSectionRelocations();
+		loadExternalRelocations();
+		loadLocalRelocations();
 	}
 
 	private void setImageBase() throws Exception {
@@ -206,39 +193,46 @@ public class MachoProgramBuilder {
 	 * 
 	 * @param header The Mach-O header to process for memory block creation.
 	 * @param source A name that represents where the memory blocks came from.
+	 * @param processSections True to split segments into their sections.
 	 * @param allowZeroAddr True if memory blocks at address 0 should be processed; otherwise, 
 	 *   false.
 	 * @throws Exception If there was a problem processing the memory blocks.
 	 */
-	protected void processMemoryBlocks(MachHeader header, String source, boolean allowZeroAddr)
-			throws Exception {
+	protected void processMemoryBlocks(MachHeader header, String source, boolean processSections,
+			boolean allowZeroAddr) throws Exception {
 		monitor.setMessage("Processing memory blocks for " + source + "...");
 
 		if (header.getFileType() == MachHeaderFileTypes.MH_DYLIB_STUB) {
 			return;
 		}
 
-		// Create memory blocks for segments
-		for (SegmentCommand segment : header.getAllSegments()) {
+		// Create memory blocks for segments.
+		ListIterator<SegmentCommand> it = header.getAllSegments().listIterator();
+		while (it.hasNext()) {
+			int i = it.nextIndex();
+			final SegmentCommand segment = it.next();
+
 			if (monitor.isCancelled()) {
 				break;
 			}
 
 			if (segment.getFileSize() > 0 && (allowZeroAddr || segment.getVMaddress() != 0)) {
-				if (createMemoryBlock(segment.getSegmentName(),
-					space.getAddress(segment.getVMaddress()), segment.getFileOffset(),
-					segment.getFileSize(), segment.getSegmentName(), source, segment.isRead(),
-					segment.isWrite(), segment.isExecute(), false) == null) {
+				String segmentName = segment.getSegmentName();
+				if (segmentName.isBlank()) {
+					segmentName = "SEGMENT." + i;
+				}
+				if (createMemoryBlock(segmentName, space.getAddress(segment.getVMaddress()),
+					segment.getFileOffset(), segment.getFileSize(), segmentName, source,
+					segment.isRead(), segment.isWrite(), segment.isExecute(), false) == null) {
 					log.appendMsg(String.format("Failed to create block: %s 0x%x 0x%x",
 						segment.getSegmentName(), segment.getVMaddress(), segment.getVMsize()));
 				}
 				if (segment.getVMsize() > segment.getFileSize()) {
 					// Pad the remaining address range with uninitialized data
-					if (createMemoryBlock(segment.getSegmentName(),
+					if (createMemoryBlock(segmentName,
 						space.getAddress(segment.getVMaddress()).add(segment.getFileSize()), 0,
-						segment.getVMsize() - segment.getFileSize(), segment.getSegmentName(),
-						source, segment.isRead(), segment.isWrite(), segment.isExecute(),
-						true) == null) {
+						segment.getVMsize() - segment.getFileSize(), segmentName, source,
+						segment.isRead(), segment.isWrite(), segment.isExecute(), true) == null) {
 						log.appendMsg(String.format("Failed to create block: %s 0x%x 0x%x",
 							segment.getSegmentName(), segment.getVMaddress(), segment.getVMsize()));
 					}
@@ -251,25 +245,28 @@ public class MachoProgramBuilder {
 		}
 
 		// Create memory blocks for sections.  They will be in the segments we just created, so the
-		// segment blocks will be split and possible replaced.
-		for (Section section : header.getAllSections()) {
-			if (monitor.isCancelled()) {
-				break;
-			}
-
-			if (section.getSize() > 0 && (allowZeroAddr || section.getAddress() != 0)) {
-				if (createMemoryBlock(section.getSectionName(),
-					space.getAddress(section.getAddress()), section.getOffset(), section.getSize(),
-					section.getSegmentName(), source, section.isRead(), section.isWrite(),
-					section.isExecute(), section.getType() == SectionTypes.S_ZEROFILL) == null) {
-					log.appendMsg(String.format("Failed to create block: %s.%s 0x%x 0x%x %s",
-						section.getSegmentName(), section.getSectionName(), section.getAddress(),
-						section.getSize(), source));
+		// segment blocks will be split and possibly replaced.
+		if (processSections) {
+			for (Section section : header.getAllSections()) {
+				if (monitor.isCancelled()) {
+					break;
 				}
-			}
-			else {
-				log.appendMsg("Skipping section: " + section.getSegmentName() + "." +
-					section.getSectionName() + " (" + source + ")");
+
+				if (section.getSize() > 0 && (allowZeroAddr || section.getAddress() != 0)) {
+					if (createMemoryBlock(section.getSectionName(),
+						space.getAddress(section.getAddress()), section.getOffset(),
+						section.getSize(), section.getSegmentName(), source, section.isRead(),
+						section.isWrite(), section.isExecute(),
+						section.getType() == SectionTypes.S_ZEROFILL) == null) {
+						log.appendMsg(String.format("Failed to create block: %s.%s 0x%x 0x%x %s",
+							section.getSegmentName(), section.getSectionName(),
+							section.getAddress(), section.getSize(), source));
+					}
+				}
+				else {
+					log.appendMsg("Skipping section: " + section.getSegmentName() + "." +
+						section.getSectionName() + " (" + source + ")");
+				}
 			}
 		}
 	}
@@ -298,8 +295,9 @@ public class MachoProgramBuilder {
 			long dataLength, String comment, String source, boolean r, boolean w, boolean x,
 			boolean zeroFill) throws Exception {
 
-		// iOS 12 address fixup
-		if ((start.getOffset() & 0xfff000000000L) != 0) {
+		// iOS 12 chained pointer address fixup (does not apply to x86)
+		if (!program.getLanguageID().getIdAsString().startsWith("x86") &&
+			(start.getOffset() & 0xfff000000000L) != 0) {
 			start = space.getAddress(start.getOffset() | 0xffff000000000000L);
 		}
 
@@ -320,12 +318,12 @@ public class MachoProgramBuilder {
 		if (intersectingBlocks.isEmpty()) {
 			if (zeroFill) {
 				// Treat zero-fill blocks as uninitialized to save space
-				return mbu.createUninitializedBlock(false, name, start, dataLength, comment, source,
-					r, w, x);
+				return MemoryBlockUtils.createUninitializedBlock(program, false, name, start,
+					dataLength, comment, source, r, w, x, log);
 			}
 
-			return mbu.createInitializedBlock(name, start, provider.getInputStream(dataOffset),
-				dataLength, comment, source, r, w, x, monitor);
+			return MemoryBlockUtils.createInitializedBlock(program, false, name, start, fileBytes,
+				dataOffset, dataLength, comment, source, r, w, x, log);
 		}
 
 		// Split the starting block (if necessary).  Splitting is not necessary if the start of our 
@@ -352,9 +350,7 @@ public class MachoProgramBuilder {
 		for (MemoryBlock block : memory.getBlocks()) {
 			if (range.intersects(block.getStart(), block.getEnd())) {
 				block.setName(name);
-				block.setRead(r);
-				block.setWrite(w);
-				block.setExecute(x);
+				block.setPermissions(r, w, x);
 				block.setSourceName(source);
 				block.setComment(comment);
 			}
@@ -397,6 +393,11 @@ public class MachoProgramBuilder {
 					continue;
 				}
 				if (symbol.isTypeUndefined()) {
+					continue;
+				}
+
+				// is a re-exported symbol, will be added as an external later
+				if (symbol.isIndirect()) {
 					continue;
 				}
 
@@ -527,7 +528,7 @@ public class MachoProgramBuilder {
 			}
 			else if (command instanceof SubLibraryCommand) {
 				SubLibraryCommand sublibCommand = (SubLibraryCommand) command;
-				addLibrary(sublibCommand.getSubLibraryName());
+				addLibrary(sublibCommand.getSubLibraryName().getString());
 			}
 			else if (command instanceof PreboundDynamicLibraryCommand) {
 				PreboundDynamicLibraryCommand pbdlCommand = (PreboundDynamicLibraryCommand) command;
@@ -550,14 +551,14 @@ public class MachoProgramBuilder {
 		List<SubUmbrellaCommand> umbrellas = machoHeader.getLoadCommands(SubUmbrellaCommand.class);
 		for (int i = 0; i < umbrellas.size(); ++i) {
 			props.setString("Mach-O Sub-umbrella " + i,
-				umbrellas.get(i).getSubUmbrellaFrameworkName());
+				umbrellas.get(i).getSubUmbrellaFrameworkName().getString());
 		}
 
 		List<SubFrameworkCommand> frameworks =
 			machoHeader.getLoadCommands(SubFrameworkCommand.class);
 		for (int i = 0; i < frameworks.size(); ++i) {
 			props.setString("Mach-O Sub-framework " + i,
-				frameworks.get(i).getUmbrellaFrameworkName());
+				frameworks.get(i).getUmbrellaFrameworkName().getString());
 		}
 	}
 
@@ -609,8 +610,8 @@ public class MachoProgramBuilder {
 		}
 		Address start = getAddress();
 		try {
-			MemoryBlock block = memory.createUninitializedBlock("EXTERNAL", start,
-				undefinedSymbols.size() * machoHeader.getAddressSize(), false);
+			MemoryBlock block = memory.createUninitializedBlock(MemoryBlock.EXTERNAL_BLOCK_NAME,
+				start, undefinedSymbols.size() * machoHeader.getAddressSize(), false);
 			// assume any value in external is writable.
 			block.setWrite(true);
 			block.setSourceName(BLOCK_SOURCE_NAME);
@@ -793,12 +794,86 @@ public class MachoProgramBuilder {
 						StructConverter.STRING, loadCommand.getCommandSize() - path.getOffset(),
 						false, DataUtilities.ClearDataMode.CHECK_FOR_SPACE);
 				}
+				else if (loadCommand instanceof SubFrameworkCommand) {
+					SubFrameworkCommand subFrameworkCommand = (SubFrameworkCommand) loadCommand;
+					LoadCommandString name = subFrameworkCommand.getUmbrellaFrameworkName();
+					DataUtilities.createData(program, loadCommandAddr.add(name.getOffset()),
+						StructConverter.STRING, loadCommand.getCommandSize() - name.getOffset(),
+						false, DataUtilities.ClearDataMode.CHECK_FOR_SPACE);
+				}
+				else if (loadCommand instanceof SubClientCommand) {
+					SubClientCommand subClientCommand = (SubClientCommand) loadCommand;
+					LoadCommandString name = subClientCommand.getClientName();
+					DataUtilities.createData(program, loadCommandAddr.add(name.getOffset()),
+						StructConverter.STRING, loadCommand.getCommandSize() - name.getOffset(),
+						false, DataUtilities.ClearDataMode.CHECK_FOR_SPACE);
+				}
+				else if (loadCommand instanceof SubLibraryCommand) {
+					SubLibraryCommand subLibraryCommand = (SubLibraryCommand) loadCommand;
+					LoadCommandString name = subLibraryCommand.getSubLibraryName();
+					DataUtilities.createData(program, loadCommandAddr.add(name.getOffset()),
+						StructConverter.STRING, loadCommand.getCommandSize() - name.getOffset(),
+						false, DataUtilities.ClearDataMode.CHECK_FOR_SPACE);
+				}
+				else if (loadCommand instanceof SubUmbrellaCommand) {
+					SubUmbrellaCommand subUmbrellaCommand = (SubUmbrellaCommand) loadCommand;
+					LoadCommandString name = subUmbrellaCommand.getSubUmbrellaFrameworkName();
+					DataUtilities.createData(program, loadCommandAddr.add(name.getOffset()),
+						StructConverter.STRING, loadCommand.getCommandSize() - name.getOffset(),
+						false, DataUtilities.ClearDataMode.CHECK_FOR_SPACE);
+				}
+				else if (loadCommand instanceof LinkerOptionCommand) {
+					LinkerOptionCommand linkerOptionCommand = (LinkerOptionCommand) loadCommand;
+					List<String> linkerOptions = linkerOptionCommand.getLinkerOptions();
+					int offset = linkerOptionCommand.toDataType().getLength();
+					for (int i = 0; i < linkerOptions.size(); i++) {
+						Address addr = loadCommandAddr.add(offset);
+						int len = linkerOptions.get(i).length() + 1;
+						if (i == linkerOptions.size() - 1) {
+							len = (int) (NumericUtilities.getUnsignedAlignedValue(
+								addr.add(len).getOffset(), 4) - addr.getOffset());
+						}
+						DataUtilities.createData(program, addr, StructConverter.STRING, len, false,
+							DataUtilities.ClearDataMode.CHECK_FOR_SPACE);
+						offset += len;
+					}
+				}
 			}
 		}
 		catch (CodeUnitInsertionException e) {
 			log.appendMsg("Error laying down header structures " + e);
 		}
 
+	}
+
+	/**
+	 * Sets up the {@link MachHeader} in memory and returns its address.  If the header was not 
+	 * intended to reside in memory (like for Mach-O object files}, then this method will create an 
+	 * area in the "OTHER" address space for the header to live in.
+	 * 
+	 * @param segments A {@link Collection} of {@link SegmentCommand Mach-O segments}
+	 * @return The {@link Address} of {@link MachHeader} in memory
+	 */
+	private Address setupHeaderAddr(Collection<SegmentCommand> segments)
+			throws AddressOverflowException {
+		Address headerAddr = null;
+		long lowestFileOffset = Long.MAX_VALUE;
+
+		// Check to see if the header resides in an existing segment.  If it does, we know its
+		// address and we are done.  Keep track of the lowest file offset of later use.
+		for (SegmentCommand segment : segments) {
+			if (segment.getFileOffset() == 0 && segment.getFileSize() > 0) {
+				return space.getAddress(segment.getVMaddress());
+			}
+			lowestFileOffset = Math.min(lowestFileOffset, segment.getFileOffset());
+		}
+
+		// The header did not live in a defined segment.  Create a memory region in the OTHER space 
+		// and copy the header there.
+		headerAddr = AddressSpace.OTHER_SPACE.getAddress(0);
+		MemoryBlock headerBlock = MemoryBlockUtils.createInitializedBlock(program, true, "HEADER",
+			headerAddr, fileBytes, 0, lowestFileOffset, "Header", "", false, false, false, log);
+		return headerBlock.getStart();
 	}
 
 	private void markupSections() throws Exception {
@@ -952,38 +1027,76 @@ public class MachoProgramBuilder {
 
 		monitor.setMessage("Processing relocation table...");
 
+		MachoRelocationHandler handler = MachoRelocationHandlerFactory.getHandler(machoHeader);
+
 		List<Section> sections = machoHeader.getAllSections();
 		for (Section section : sections) {
 			if (monitor.isCancelled()) {
 				return;
 			}
-			List<RelocationInfo> relocations = section.getRelocations();
-			for (RelocationInfo relocation : relocations) {
+
+			MemoryBlock sectionMemoryBlock = getMemoryBlock(section);
+			if (sectionMemoryBlock == null) {
+				if (section.getNumberOfRelocations() > 0) {
+					log.appendMsg("Unable to process relocations for " + section.getSectionName() +
+						". No memory block was created.");
+				}
+				continue;
+			}
+
+			Iterator<RelocationInfo> iter = section.getRelocations().iterator();
+			while (iter.hasNext()) {
 				if (monitor.isCancelled()) {
 					return;
 				}
-				boolean handled = false;
-				try {
-					if (machoHeader.getCpuType() == CpuTypes.CPU_TYPE_X86 ||
-						machoHeader.getCpuType() == CpuTypes.CPU_TYPE_X86_64) {
 
-						processSectionRelocation_x86(section, relocation);
-						handled = true;
-					}
-					else if (machoHeader.getCpuType() == CpuTypes.CPU_TYPE_POWERPC) {
-						//PPC RELOCATIONS ARE GOOD TO GO, AS IS
-						handled = true;
-					}
-					else if (machoHeader.getCpuType() == CpuTypes.CPU_TYPE_ARM) {//TODO
+				RelocationInfo relocationInfo = iter.next();
+				Address address = sectionMemoryBlock.getStart().add(relocationInfo.getAddress());
+				byte[] origBytes = getOriginalRelocationBytes(relocationInfo, address);
+				MachoRelocation relocation = null;
 
+				if (handler == null) {
+					handleRelocationError(address, String.format(
+						"No relocation handler for machine type 0x%x to process relocation at %s with type 0x%x",
+						machoHeader.getCpuType(), address, relocationInfo.getType()));
+				}
+				else {
+					try {
+						relocation = handler.isPairedRelocation(relocationInfo)
+								? new MachoRelocation(program, machoHeader, address, relocationInfo,
+									iter.next())
+								: new MachoRelocation(program, machoHeader, address,
+									relocationInfo);
+						handler.relocate(relocation);
+					}
+					catch (MemoryAccessException e) {
+						handleRelocationError(address, String.format(
+							"Error accessing memory at address %s.  Relocation failed.", address));
+					}
+					catch (NotFoundException e) {
+						handleRelocationError(address,
+							String.format("Relocation type 0x%x at address %s is not supported: %s",
+								relocationInfo.getType(), address, e.getMessage()));
+					}
+					catch (AddressOutOfBoundsException e) {
+						handleRelocationError(address,
+							String.format("Error computing relocation at address %s.", address));
 					}
 				}
-				catch (Exception e) {
-					log.appendMsg("Error loading section relocations: " + e.getMessage());
-				}
-				addToRelocationTable(section, relocation, handled);
+
+				program.getRelocationTable().add(address, relocationInfo.getType(),
+					new long[] { relocationInfo.getValue(), relocationInfo.getLength(),
+						relocationInfo.isPcRelocated() ? 1 : 0, relocationInfo.isExternal() ? 1 : 0,
+						relocationInfo.isScattered() ? 1 : 0 },
+					origBytes, relocation.getTargetDescription());
 			}
 		}
+	}
+
+	private void handleRelocationError(Address address, String message) {
+		program.getBookmarkManager().setBookmark(address, BookmarkType.ERROR, "Relocations",
+			message);
+		log.appendMsg(message);
 	}
 
 	private void loadExternalRelocations() {
@@ -1002,7 +1115,7 @@ public class MachoProgramBuilder {
 				if (monitor.isCancelled()) {
 					break;
 				}
-				loadRelocation(RelocationFactory.EXTERNAL, reloc);
+				loadRelocation(reloc);
 			}
 		}
 	}
@@ -1023,7 +1136,7 @@ public class MachoProgramBuilder {
 				if (monitor.isCancelled()) {
 					return;
 				}
-				loadRelocation(RelocationFactory.LOCAL, reloc);
+				loadRelocation(reloc);
 			}
 		}
 	}
@@ -1055,7 +1168,7 @@ public class MachoProgramBuilder {
 		return space.getAddress(relocBase);
 	}
 
-	private void loadRelocation(int relocationType, RelocationInfo relocation) {
+	private void loadRelocation(RelocationInfo relocation) {
 
 		Address baseAddr = getRelocationBaseAddress();
 
@@ -1069,8 +1182,8 @@ public class MachoProgramBuilder {
 
 		byte[] originalRelocationBytes = getOriginalRelocationBytes(relocation, relocationAddress);
 
-		program.getRelocationTable().add(relocationAddress, relocationType, relocation.toValues(),
-			originalRelocationBytes, null);
+		program.getRelocationTable().add(relocationAddress, relocation.getType(),
+			relocation.toValues(), originalRelocationBytes, null);
 	}
 
 	private void addLibrary(String library) {
@@ -1292,102 +1405,10 @@ public class MachoProgramBuilder {
 		}
 	}
 
-	private void processSectionRelocation_x86(Section relocationSection,
-			RelocationInfo relocation) {
-
-		DataConverter dc = getDataConverter();
-
-		MemoryBlock memoryBlock = getMemoryBlock(relocationSection);
-
-		Address relocationAddress = memoryBlock.getStart().add(relocation.getAddress());
-
-		int relocationSize = (int) Math.pow(2, Math.min(2, relocation.getLength()));
-
-		Address destinationAddress = memoryBlock.getStart().getNewAddress(0);
-
-		byte[] originalRelocationBytes = getOriginalRelocationBytes(relocation, relocationAddress);
-
-		if (relocation instanceof ScatteredRelocationInfo) {
-			Address relocationBase = getRelocationBaseAddress();
-			relocationAddress = relocationBase.add(relocation.getAddress());
-		}
-		else {
-			if (relocation.isExternal()) {
-				int symbolIndex = relocation.getSymbolIndex();
-				NList nList = machoHeader.getFirstLoadCommand(SymbolTableCommand.class).getSymbolAt(
-					symbolIndex);
-				Symbol symbol = SymbolUtilities.getLabelOrFunctionSymbol(program, nList.getString(),
-					err -> log.error("Macho", err));
-				if (relocation.isPcRelocated()) {
-
-					destinationAddress = symbol.getAddress().subtractWrap(
-						relocationAddress.getOffset()).subtractWrap(4);
-					/** for x86_64 relocations, the original code contains the offset into the symbol.
-					 *   usually it is just 00 00 00 00, but in some cases there is a value there which
-					 *   tells us to offset.  _foo+4 would be 04 00 00 00.  confirmed in x86_64/reloc.h for Mach-O.
-					 */
-					if (machoHeader.getCpuType() == CpuTypes.CPU_TYPE_X86_64) {
-						destinationAddress =
-							destinationAddress.add(dc.getInt(originalRelocationBytes));
-					}
-				}
-				else {
-					destinationAddress = symbol.getAddress();
-				}
-			}
-			else {
-				int originalRelocationValue = dc.getInt(originalRelocationBytes);
-				int sectionIndex = relocation.getSymbolIndex();
-				Section section = machoHeader.getAllSections().get(sectionIndex - 1);
-				long difference = originalRelocationValue - section.getAddress();
-				destinationAddress = space.getAddress(section.getAddress() + difference);
-			}
-		}
-
-		byte[] destinationBytes = new byte[originalRelocationBytes.length];
-		try {
-			dc.getBytes((int) destinationAddress.getOffset(), destinationBytes);// TODO
-																				// just
-																				// truncate
-																				// to
-																				// INT??
-
-			memory.setBytes(relocationAddress, destinationBytes, 0, relocationSize);
-		}
-		catch (Exception e) {
-			log.appendMsg(
-				"Unable to process relocation at " + relocationAddress + ": " + e.getMessage());
-		}
-	}
-
-	private DataConverter getDataConverter() {
-		DataConverter dc = program.getLanguage().isBigEndian() ? new BigEndianDataConverter()
-				: new LittleEndianDataConverter();
-		return dc;
-	}
-
-	private void addToRelocationTable(Section relocationSection, RelocationInfo relocation,
-			boolean handled) {
-		MemoryBlock memoryBlock = getMemoryBlock(relocationSection);
-
-		Address relocationAddress = memoryBlock.getStart().add(relocation.getAddress());
-
-		byte[] originalRelocationBytes = getOriginalRelocationBytes(relocation, relocationAddress);
-
-		program.getRelocationTable().add(relocationAddress, RelocationFactory.SECTION,
-			relocation.toValues(), originalRelocationBytes, null);
-
-		if (!handled) {
-			BookmarkManager bookmarkManager = program.getBookmarkManager();
-			bookmarkManager.setBookmark(relocationAddress, BookmarkType.ERROR, "Relocations",
-				"Unhandled relocation");
-		}
-	}
-
 	private byte[] getOriginalRelocationBytes(RelocationInfo relocation,
 			Address relocationAddress) {
 
-		int relocationSize = (int) Math.pow(2, Math.min(2, relocation.getLength()));
+		int relocationSize = (int) Math.pow(2, relocation.getLength());
 		byte[] originalRelocationBytes = new byte[relocationSize];
 		try {
 			memory.getBytes(relocationAddress, originalRelocationBytes);

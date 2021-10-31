@@ -36,6 +36,8 @@ public class ObjectChooserDialog<T> extends DialogComponentProvider {
 		this.objectClass = objectClass;
 		this.choosableObjects = choosableObjects;
 		this.methodsForColumns = methodsForColumns;
+
+		setTransient(true);
 		addWorkPanel(buildWorkPanel());
 		addOKButton();
 		addCancelButton();
@@ -57,13 +59,17 @@ public class ObjectChooserDialog<T> extends DialogComponentProvider {
 		table.focusFilter();
 	}
 
+	public GTableWidget<T> getTable() {
+		return table;
+	}
+
 	private JComponent buildWorkPanel() {
 		table = new GTableWidget<>(getTitle(), objectClass, methodsForColumns);
 		table.setData(choosableObjects);
 
 		table.addSelectionListener(t -> objectSelected(t));
 
-		table.setItemPickListner(t -> objectPicked(t));
+		table.setItemPickListener(t -> objectPicked(t));
 
 		return table;
 	}
@@ -80,5 +86,15 @@ public class ObjectChooserDialog<T> extends DialogComponentProvider {
 
 	public T getSelectedObject() {
 		return selectedObject;
+	}
+
+	public void setFilterText(String text) {
+		table.setFilterText(text);
+	}
+
+	@Override
+	public void close() {
+		table.dispose();
+		super.close();
 	}
 }

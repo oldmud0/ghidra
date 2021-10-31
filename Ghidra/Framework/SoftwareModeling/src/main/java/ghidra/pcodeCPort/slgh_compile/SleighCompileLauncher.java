@@ -17,23 +17,17 @@ package ghidra.pcodeCPort.slgh_compile;
 
 import java.io.*;
 import java.util.*;
-import java.util.Map.Entry;
 
-import org.antlr.runtime.*;
-import org.antlr.runtime.tree.CommonTreeNodeStream;
-import org.jdom.*;
-import org.jdom.input.SAXBuilder;
+import org.antlr.runtime.RecognitionException;
+import org.jdom.JDOMException;
 
-import generic.stl.IteratorSTL;
+import generic.jar.ResourceFile;
 import ghidra.GhidraApplicationLayout;
 import ghidra.GhidraLaunchable;
-import ghidra.pcodeCPort.context.SleighError;
-import ghidra.pcodeCPort.translate.XmlError;
-import ghidra.sleigh.grammar.*;
+import ghidra.framework.Application;
+import ghidra.framework.ApplicationConfiguration;
 import ghidra.util.Msg;
-import ghidra.util.xml.XmlUtilities;
-import utilities.util.FileResolutionResult;
-import utilities.util.FileUtilities;
+import ghidra.util.SystemUtilities;
 
 /**
  * <code>SleighCompileLauncher</code> Sleigh compiler launch provider
@@ -45,74 +39,84 @@ public class SleighCompileLauncher implements GhidraLaunchable {
 	private static final FileFilter SLASPEC_FILTER =
 		pathname -> pathname.getName().endsWith(".slaspec");
 
-	private static void initCompiler(SleighCompile compiler, Map<String, String> preprocs,
-			boolean unnecessaryPcodeWarning, boolean lenientConflict, boolean allNopWarning,
-			boolean deadTempWarning, boolean unusedFieldWarning, boolean enforceLocalKeyWord) {
-		Set<Entry<String, String>> entrySet = preprocs.entrySet();
-		for (Entry<String, String> entry : entrySet) {
-			compiler.setPreprocValue(entry.getKey(), entry.getValue());
-		}
-		compiler.setUnnecessaryPcodeWarning(unnecessaryPcodeWarning);
-		compiler.setLenientConflict(lenientConflict);
-		compiler.setAllNopWarning(allNopWarning);
-		compiler.setDeadTempWarning(deadTempWarning);
-		compiler.setUnusedFieldWarning(unusedFieldWarning);
-		compiler.setEnforceLocalKeyWord(enforceLocalKeyWord);
-	}
-
 	@Override
 	public void launch(GhidraApplicationLayout layout, String[] args)
 			throws JDOMException, IOException, RecognitionException {
-		System.exit(runMain(args, new HashMap<String, String>()));
+
+		// Initialize the application
+		ApplicationConfiguration configuration = new ApplicationConfiguration();
+		Application.initializeApplication(layout, configuration);
+
+		System.exit(runMain(args));
 	}
 
 	/**
 	 * Execute the Sleigh compiler process
 	 * 
 	 * @param args sleigh compiler command line arguments
-	 * @param preprocs additional preprocessor macro
 	 * @return exit code (TODO: exit codes are not well defined)
-	 * @throws JDOMException
-	 * @throws IOException
-	 * @throws RecognitionException
+	 * @throws JDOMException for XML errors
+	 * @throws IOException for file access errors
+	 * @throws RecognitionException for parse errors
 	 */
-	public static int runMain(String[] args, Map<String, String> preprocs)
+	public static int runMain(String[] args)
 			throws JDOMException, IOException, RecognitionException {
 		int retval;
 		String filein = null;
 		String fileout = null;
+		Map<String, String> preprocs = new HashMap<>();
 
 		SleighCompile.yydebug = false;
 		boolean allMode = false;
 
 		if (args.length < 1) {
 			// @formatter:off
-			Msg.info(SleighCompile.class, "USAGE: sleigh [-x] [-dNAME=VALUE] inputfile outputfile");
-			Msg.info(SleighCompile.class, "   -x              turns on parser debugging");
-			Msg.info(SleighCompile.class, "   -u              print warnings for unnecessary pcode instructions");
-			Msg.info(SleighCompile.class, "   -l              report pattern conflicts");
-			Msg.info(SleighCompile.class, "   -n              print warnings for all NOP constructors");
-			Msg.info(SleighCompile.class, "   -t              print warnings for dead temporaries");
-			Msg.info(SleighCompile.class, "   -e              enforce use of 'local' keyword for temporaries");
-			Msg.info(SleighCompile.class, "   -f              print warnings for unused token fields");
-			Msg.info(SleighCompile.class, "   -DNAME=VALUE    defines a preprocessor macro NAME with value VALUE");
-			Msg.info(SleighCompile.class, " OR    sleigh -a directory-root");
-			Msg.info(SleighCompile.class, "                   compiles all .slaspec files to .sla files anywhere under directory-root");
+			Msg.info(SleighCompile.class, "Usage: sleigh [options...] [<infile.slaspec> [<outfile.sla>] | -a <directory-path>]");
+			Msg.info(SleighCompile.class, "    sleigh [options...] <infile.slaspec> [<outfile.sla>]");
+			Msg.info(SleighCompile.class, "       <infile.slaspec>   source slaspec file to be compiled");
+			Msg.info(SleighCompile.class, "       <outfile.sla>      optional output sla file (infile.sla assumed)");
+			Msg.info(SleighCompile.class, "  or");
+			Msg.info(SleighCompile.class, "    sleigh [options...] -a <directory-path>");
+			Msg.info(SleighCompile.class, "       <directory-path>   directory to have all slaspec files compiled");
+			Msg.info(SleighCompile.class, "  options:");
+			Msg.info(SleighCompile.class, "   -x                turns on parser debugging");
+			Msg.info(SleighCompile.class, "   -u                print warnings for unnecessary pcode instructions");
+			Msg.info(SleighCompile.class, "   -l                report pattern conflicts");
+			Msg.info(SleighCompile.class, "   -n                print warnings for all NOP constructors");
+			Msg.info(SleighCompile.class, "   -t                print warnings for dead temporaries");
+			Msg.info(SleighCompile.class, "   -e                enforce use of 'local' keyword for temporaries");
+			Msg.info(SleighCompile.class, "   -c                print warnings for all constructors with colliding operands");
+			Msg.info(SleighCompile.class, "   -f                print warnings for unused token fields");
+			Msg.info(SleighCompile.class, "   -o                print warnings for temporaries which are too large");
+			Msg.info(SleighCompile.class,  "  -s                treat register names as case sensitive");
+			Msg.info(SleighCompile.class, "   -DNAME=VALUE      defines a preprocessor macro NAME with value VALUE (option may be repeated)");
+			Msg.info(SleighCompile.class, "   -dMODULE          defines a preprocessor macro MODULE with a value of its module path (option may be repeated)");
+			Msg.info(SleighCompile.class, "   -i <options-file> inject options from specified file");
 			// @formatter:on
 			return 2;
 		}
 
 		boolean unnecessaryPcodeWarning = false;
 		boolean lenientConflict = true;
+		boolean allCollisionWarning = false;
 		boolean allNopWarning = false;
 		boolean deadTempWarning = false;
 		boolean enforceLocalKeyWord = false;
 		boolean unusedFieldWarning = false;
+		boolean largeTemporaryWarning = false;
+		boolean caseSensitiveRegisterNames = false;
 
 		int i;
 		for (i = 0; i < args.length; ++i) {
 			if (args[i].charAt(0) != '-') {
 				break;
+			}
+			else if (args[i].charAt(1) == 'i') {
+				// inject options from file specified by next argument
+				args = injectOptionsFromFile(args, ++i);
+				if (args == null) {
+					return 1;
+				}
 			}
 			else if (args[i].charAt(1) == 'D') {
 				String preproc = args[i].substring(2);
@@ -124,6 +128,18 @@ public class SleighCompileLauncher implements GhidraLaunchable {
 				String name = preproc.substring(0, pos);
 				String value = preproc.substring(pos + 1);
 				preprocs.put(name, value); // Preprocessor macro definitions
+			}
+			else if (args[i].charAt(1) == 'd') {
+				String moduleName = args[i].substring(2);
+				ResourceFile module = Application.getModuleRootDir(moduleName);
+				if (module == null || !module.isDirectory()) {
+					Msg.error(SleighCompile.class,
+						"Failed to resolve module reference: " + args[i]);
+					return 1;
+				}
+				Msg.debug(SleighCompile.class,
+					"Sleigh resolved module: " + moduleName + "=" + module.getAbsolutePath());
+				preprocs.put(moduleName, module.getAbsolutePath()); // Preprocessor macro definitions
 			}
 			else if (args[i].charAt(1) == 'u') {
 				unnecessaryPcodeWarning = true;
@@ -140,11 +156,20 @@ public class SleighCompileLauncher implements GhidraLaunchable {
 			else if (args[i].charAt(1) == 'l') {
 				lenientConflict = false;
 			}
+			else if (args[i].charAt(1) == 'c') {
+				allCollisionWarning = true;
+			}
 			else if (args[i].charAt(1) == 'n') {
 				allNopWarning = true;
 			}
 			else if (args[i].charAt(1) == 'a') {
 				allMode = true;
+			}
+			else if (args[i].charAt(1) == 'o') {
+				largeTemporaryWarning = true;
+			}
+			else if (args[i].charAt(1) == 's') {
+				caseSensitiveRegisterNames = true;
 			}
 			else if (args[i].charAt(1) == 'x') {
 				SleighCompile.yydebug = true; // Debug option
@@ -155,7 +180,16 @@ public class SleighCompileLauncher implements GhidraLaunchable {
 			}
 		}
 
+		if (i < args.length - 2) {
+			Msg.error(SleighCompile.class, "Too many parameters");
+			return 1;
+		}
+
 		if (allMode) {
+			if (i == args.length) {
+				Msg.error(SleighCompile.class, "Missing input directory path");
+				return 1;
+			}
 			String directory = args[i];
 			File dir = new File(directory);
 			if (!dir.exists() || !dir.isDirectory()) {
@@ -169,13 +203,14 @@ public class SleighCompileLauncher implements GhidraLaunchable {
 			for (File input : visitor) {
 				System.out.println("Compiling " + input + ":");
 				SleighCompile compiler = new SleighCompile();
-				initCompiler(compiler, preprocs, unnecessaryPcodeWarning, lenientConflict,
-					allNopWarning, deadTempWarning, unusedFieldWarning, enforceLocalKeyWord);
+				compiler.setAllOptions(preprocs, unnecessaryPcodeWarning, lenientConflict,
+					allCollisionWarning, allNopWarning, deadTempWarning, unusedFieldWarning,
+					enforceLocalKeyWord, largeTemporaryWarning, caseSensitiveRegisterNames);
 
 				String outname = input.getName().replace(".slaspec", ".sla");
 				File output = new File(input.getParent(), outname);
 				retval =
-					run_compilation(input.getAbsolutePath(), output.getAbsolutePath(), compiler);
+					compiler.run_compilation(input.getAbsolutePath(), output.getAbsolutePath());
 				System.out.println();
 				if (retval != 0) {
 					++totalFailures;
@@ -195,15 +230,13 @@ public class SleighCompileLauncher implements GhidraLaunchable {
 			return -totalFailures;
 		}
 
+		// single file compile
 		SleighCompile compiler = new SleighCompile();
-		initCompiler(compiler, preprocs, unnecessaryPcodeWarning, lenientConflict, allNopWarning,
-			deadTempWarning, unusedFieldWarning, enforceLocalKeyWord);
+		compiler.setAllOptions(preprocs, unnecessaryPcodeWarning, lenientConflict,
+			allCollisionWarning, allNopWarning, deadTempWarning, unusedFieldWarning,
+			enforceLocalKeyWord, largeTemporaryWarning, caseSensitiveRegisterNames);
 		if (i == args.length) {
 			Msg.error(SleighCompile.class, "Missing input file name");
-			return 1;
-		}
-		if (i < args.length - 2) {
-			Msg.error(SleighCompile.class, "Too many parameters");
 			return 1;
 		}
 
@@ -212,236 +245,65 @@ public class SleighCompileLauncher implements GhidraLaunchable {
 			fileout = args[i + 1];
 		}
 
-		String fileinExamine = filein;
-		int extInPos = fileinExamine.indexOf(FILE_IN_DEFAULT_EXT);
-		boolean autoExtInSet = false;
-		String fileinPreExt = "";
-		if (extInPos == -1) {// No Extension Given...
-			// cout << "No Ext Given" << endl;
-			fileinPreExt = fileinExamine;
-			fileinExamine += FILE_IN_DEFAULT_EXT;
-			filein = fileinExamine;
-			// cout << "filein = " << filein << endl;
-			autoExtInSet = true;
+		String baseName = filein;
+		if (filein.toLowerCase().endsWith(FILE_IN_DEFAULT_EXT)) {
+			baseName = filein.substring(0, filein.length() - FILE_IN_DEFAULT_EXT.length());
 		}
-		else {
-			fileinPreExt = fileinExamine.substring(0, extInPos);
-		}
-		// cout << "fileinPreExt = " << fileinPreExt << endl;
+		filein = baseName + FILE_IN_DEFAULT_EXT;
 
-		if (fileout != null) {
-			String fileoutExamine = fileout;
-			int extOutPos = fileoutExamine.indexOf(FILE_OUT_DEFAULT_EXT);
-			if (extOutPos == -1) {// No Extension Given...
-				// cout << "No Ext Given" << endl;
-				fileoutExamine += FILE_OUT_DEFAULT_EXT;
-				fileout = fileoutExamine;
-				// cout << "fileout = " << fileout << endl;
-			}
-			retval = run_compilation(filein, fileout, compiler);
+		String baseOutName = fileout;
+		if (fileout == null) {
+			baseOutName = baseName;
 		}
-		else {
-			// First determine whether or not to use Run_XML...
-			if (autoExtInSet) {// Assumed format of at least "sleigh file" .
-				// "sleigh file.slaspec file.sla"
-				String fileoutSTR = fileinPreExt;
-				fileoutSTR += FILE_OUT_DEFAULT_EXT;
-				fileout = fileoutSTR;
-				// cout << "generated fileout = " << fileout << endl;
-				retval = run_compilation(filein, fileout, compiler);
-			}
-			else {
-				retval = run_xml(filein, compiler);
-			}
+		else if (fileout.toLowerCase().endsWith(FILE_OUT_DEFAULT_EXT)) {
+			baseOutName = fileout.substring(0, fileout.length() - FILE_OUT_DEFAULT_EXT.length());
+		}
+		fileout = baseOutName + FILE_OUT_DEFAULT_EXT;
 
-		}
-		return retval;
+		return compiler.run_compilation(filein, fileout);
 	}
 
-	private static int run_compilation(String filein, String fileout, SleighCompile compiler)
-			throws IOException, RecognitionException {
-//        try {
-//            compiler.parseFromNewFile(filein);
-		//FileInputStream yyin = new FileInputStream(new File(filein));
-//		StringWriter output = new StringWriter();
-
-//            System.out.println(output.toString());
-//		UGLY_STATIC_GLOBAL_COMPILER = null; // Set global pointer up for parser
-
-//            SleighCompiler realCompiler = new SleighCompiler(new StringReader(output.toString()));
-
-		// too late for this because we snarf a token or two on constructor time?
-//            if (yydebug) {
-//                realCompiler.enable_tracing();
-//            } else {
-//                realCompiler.disable_tracing();
-//            }
-
-		LineArrayListWriter writer = new LineArrayListWriter();
-		ParsingEnvironment env = new ParsingEnvironment(writer);
-		try {
-			final SleighCompilePreprocessorDefinitionsAdapater definitionsAdapter =
-				new SleighCompilePreprocessorDefinitionsAdapater(compiler);
-			final File inputFile = new File(filein);
-			FileResolutionResult result = FileUtilities.existsAndIsCaseDependent(inputFile);
-			if (!result.isOk()) {
-				throw new BailoutException("input file \"" + inputFile +
-					"\" is not properly case dependent: " + result.getMessage());
-			}
-			SleighPreprocessor sp = new SleighPreprocessor(definitionsAdapter, inputFile);
-			sp.process(writer);
-
-			CharStream input = new ANTLRStringStream(writer.toString());
-			SleighLexer lex = new SleighLexer(input);
-			lex.setEnv(env);
-			UnbufferedTokenStream tokens = new UnbufferedTokenStream(lex);
-			SleighParser parser = new SleighParser(tokens);
-			parser.setEnv(env);
-			parser.setLexer(lex);
-			SleighParser.spec_return root = parser.spec();
-			/*ANTLRUtil.debugTree(root.getTree(),
-				new PrintStream(new FileOutputStream("blargh.tree")));*/
-			CommonTreeNodeStream nodes = new CommonTreeNodeStream(root.getTree());
-			nodes.setTokenStream(tokens);
-			// ANTLRUtil.debugNodeStream(nodes, System.out);
-			SleighCompiler walker = new SleighCompiler(nodes);
-
-			int parseres = -1;
-			try {
-				parseres = walker.root(env, compiler); // Try to parse
-			}
-			catch (SleighError e) {
-				compiler.reportError(e.location, e.getMessage());
-			}
-//                yyin.close();
-			if (parseres == 0) {
-				if (compiler.noplist.size() > 0) {
-					if (compiler.warnallnops) {
-						IteratorSTL<String> iter;
-						for (iter = compiler.noplist.begin(); !iter.isEnd(); iter.increment()) {
-							Msg.warn(SleighCompile.class, iter.get());
-						}
-					}
-					Msg.warn(SleighCompile.class,
-						compiler.noplist.size() + " NOP constructors found");
-					if (!compiler.warnallnops) {
-						Msg.warn(SleighCompile.class, "Use -n switch to list each individually");
-					}
-				}
-				compiler.process(); // Do all the post-processing
-			}
-			if ((parseres == 0) && (compiler.numErrors() == 0)) {
-				// If no errors
-//                    try {
-				PrintStream s = new PrintStream(new FileOutputStream(new File(fileout)));
-				compiler.saveXml(s); // Dump output xml
-				s.close();
-//                    }
-//                    catch (Exception e) {
-//                        throw new SleighError("Unable to open output file: "
-//                                + fileout);
-//                    }
-			}
-			else {
-				Msg.error(SleighCompile.class, "No output produced");
-				return 2;
-			}
+	private static String[] injectOptionsFromFile(String[] args, int index) {
+		if (index >= args.length) {
+			Msg.error(SleighCompile.class, "Missing options input file name");
+			return null;
 		}
-		catch (BailoutException e) {
-			Msg.error(SleighCompile.class, "Unrecoverable error(s), halting compilation", e);
-			return 3;
-		}
-		catch (NullPointerException e) {
-			Msg.error(SleighCompile.class, "Unrecoverable error(s), halting compilation", e);
-			return 4;
-		}
-		catch (PreprocessorException e) {
-			Msg.error(SleighCompile.class, "Errors during preprocessing, halting compilation");
-			return 5;
-		}
-//            catch (LowlevelError err) {
-//                Msg.info(this, "Unrecoverable error: " + err.getMessage());
-//                err.printStackTrace();
-//                return 2;
-//            }
-//            catch (IOException e) {
-//                Msg.info(this, "Couldn't close file: " + e.getMessage());
-//                return 1;
-//            }
-//        }
-//        catch (FileNotFoundException e) {
-//            Msg.info(this, "Unable to open specfile: " + filein);
-//            return 2;
-//        }
-//        catch (IOException e) {
-//            // TODO Auto-generated catch block
-//            e.printStackTrace();
-//        }
-//        catch (ParseException e) {
-//            // TODO Auto-generated catch block
-//            e.printStackTrace();
-//        }
-		return 0;
-	}
 
-	private static int run_xml(String filein, SleighCompile compiler)
-			throws JDOMException, IOException, RecognitionException {
-		FileInputStream s = new FileInputStream(new File(filein));
-		Document doc = null;
-		String specfileout = "";
-		String specfilein = "";
-
-		try {
-			SAXBuilder builder = XmlUtilities.createSecureSAXBuilder(false, false);
-			doc = builder.build(s);
-		}
-		catch (XmlError err) {
+		File optionsFile = new File(args[index]);
+		if (!optionsFile.isFile()) {
 			Msg.error(SleighCompile.class,
-				"Unable to parse single input file as XML spec: " + filein, err);
-			return 1;
+				"Options file not found: " + optionsFile.getAbsolutePath());
+			if (SystemUtilities.isInDevelopmentMode()) {
+				Msg.error(SleighCompile.class,
+					"Eclipse language module must be selected and 'gradle prepdev' prevously run");
+			}
+			return null;
 		}
-		s.close();
-
-		Element el = doc.getRootElement();
-		for (;;) {
-			List<?> list = el.getChildren();
-			Iterator<?> iter = list.iterator();
-			while (iter.hasNext()) {
-				el = (Element) iter.next();
-				if (el.getName().equals("processorfile")) {
-					specfileout = el.getText();
-					List<?> atts = el.getAttributes();
-					Iterator<?> i = atts.iterator();
-					while (i.hasNext()) {
-						Attribute att = (Attribute) i.next();
-						if (att.getName().equals("slaspec")) {
-							specfilein = att.getValue();
-						}
-						else {
-							compiler.setPreprocValue(att.getName(), att.getValue());
-						}
-					}
-				}
-				else if (el.getName().equals("language_spec")) {
-					break;
-				}
-				else if (el.getName().equals("language_description")) {
-					break;
-				}
-			}
-			if (!iter.hasNext()) {
-				break;
-			}
+		ArrayList<String> list = new ArrayList<>();
+		for (int i = 0; i <= index; i++) {
+			list.add(args[i]);
 		}
 
-		if (specfilein.length() == 0) {
-			Msg.error(SleighCompile.class, "Input slaspec file was not specified in " + filein);
-			return 1;
+		try (BufferedReader r = new BufferedReader(new FileReader(optionsFile))) {
+			String option = r.readLine();
+			while (option != null) {
+				option = option.trim();
+				if (option.length() != 0 && !option.startsWith("#")) {
+					list.add(option);
+				}
+				option = r.readLine();
+			}
 		}
-		if (specfileout.length() == 0) {
-			Msg.error(SleighCompile.class, "Output sla file was not specified in " + filein);
-			return 1;
+		catch (IOException e) {
+			Msg.error(SleighCompile.class,
+				"Reading options file failed (" + optionsFile.getName() + "): " + e.getMessage());
+			return null;
 		}
-		return run_compilation(specfilein, specfileout, compiler);
+
+		for (int i = index + 1; i < args.length; i++) {
+			list.add(args[i]);
+		}
+		return list.toArray(new String[list.size()]);
 	}
+
 }

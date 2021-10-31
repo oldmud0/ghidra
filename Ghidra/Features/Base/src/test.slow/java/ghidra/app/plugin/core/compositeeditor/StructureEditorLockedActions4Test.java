@@ -28,14 +28,15 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 	public void testArrayBeforeUndefineds() throws Exception {
 		init(simpleStructure, pgmBbCat);
 		NumberInputDialog dialog;
-		model.clearComponents(new int[] { 2, 3 });
-
+		runSwing(() -> {
+			getModel().clearComponents(new int[] { 2, 3 });
+		});
 		setSelection(new int[] { 1 });
 		DataType dt1 = getDataType(1);
 		DataType dt8 = getDataType(8);
 
 		// Make array of 7 bytes
-		invoke(arrayAction);
+		invoke(arrayAction, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		assertEquals("Enter Number", dialog.getTitle());
@@ -64,7 +65,7 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 		checkSelection(new int[] { 1 });
 
 		// Make array of 5 quadwords
-		invoke(arrayAction);
+		invoke(arrayAction, false);
 		waitForPostedSwingRunnables();
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
@@ -86,8 +87,9 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 	public void testCycleGroupAsciiLotsOfRoom() throws Exception {
 		init(complexStructure, pgmTestCat);
 		NumberInputDialog dialog;
-		getModel().clearComponents(new int[] { 2, 3, 4 });// clear 14 bytes
-
+		runSwing(() -> {
+			getModel().clearComponents(new int[] { 2, 3, 4 });// clear 14 bytes
+		});
 		DataType dt16 = getDataType(16);
 		int dt16Len = getLength(16);
 		int num = getModel().getNumComponents();
@@ -107,7 +109,7 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 		assertEquals(getLength(16), dt16Len);
 		assertEquals(getDataType(16), dt16);
 
-		invoke(action);
+		invoke(action, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		badInput(dialog, 20);
@@ -124,7 +126,7 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 		assertEquals(getLength(2), dt16Len);
 		assertEquals(getDataType(2), dt16);
 
-		invoke(action);
+		invoke(action, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		okInput(dialog, 10);
@@ -156,8 +158,9 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 	public void testCycleGroupAsciiSomeRoom() throws Exception {
 		init(complexStructure, pgmTestCat);
 		NumberInputDialog dialog;
-		getModel().clearComponents(new int[] { 2, 3 });// clear 6 bytes
-
+		runSwing(() -> {
+			getModel().clearComponents(new int[] { 2, 3 });// clear 6 bytes
+		});
 		DataType dt8 = getDataType(8);
 		int dt8Len = getLength(8);
 		int num = getModel().getNumComponents();
@@ -177,7 +180,7 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 		assertEquals(getLength(8), dt8Len);
 		assertEquals(getDataType(8), dt8);
 
-		invoke(action);
+		invoke(action, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		okInput(dialog, 7);
@@ -191,7 +194,7 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 		assertEquals(getLength(2), dt8Len);
 		assertEquals(getDataType(2), dt8);
 
-		invoke(action);
+		invoke(action, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		okInput(dialog, 6);
@@ -238,7 +241,7 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 		assertEquals(1, getLength(1));
 		assertEquals(getDataType(1), dt1);
 
-		invoke(action);
+		invoke(action, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		badInput(dialog, 7);
@@ -252,7 +255,7 @@ public class StructureEditorLockedActions4Test extends AbstractStructureEditorLo
 		assertEquals(1, getLength(1));
 		assertEquals(getDataType(1), dt1);
 
-		invoke(action);
+		invoke(action, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		badInput(dialog, 10);

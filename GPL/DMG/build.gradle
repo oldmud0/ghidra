@@ -1,4 +1,25 @@
+/* ###
+ * IP: Public Domain
+ */
+apply from: file("../gpl.gradle").getCanonicalPath()
+
+if (findProject(':Generic') != null) {
+	apply from: "$rootProject.projectDir/gradle/javaProject.gradle"
+	apply from: "$rootProject.projectDir/gradle/distributableGPLModule.gradle"
+	
+	rootProject.assembleDistribution {
+		doLast {
+			// eliminate standard module lib directory
+			def assemblePath = destinationDir.path + "/" + getZipPath(this.project)
+			delete assemblePath + "/lib"
+		}
+	}
+}
+else {
+	apply plugin: 'java-library'
+}
 apply plugin: 'eclipse'
+
 eclipse.project.name = 'GPL DMG'
 
 /*********************************************************************************
@@ -10,6 +31,7 @@ eclipse.project.name = 'GPL DMG'
  *
  *********************************************************************************/
 sourceSets {
+	
 	dmg {
 		java {
 			srcDir 'src/dmg/java'
@@ -17,38 +39,23 @@ sourceSets {
 	}
 }
 
-eclipse.classpath.plusConfigurations += [configurations.dmgCompile]
+repositories {
+	flatDir name: "flat", dirs:["data/lib"]
+}
 
 dependencies {
-	dmgCompile ':csframework@jar'
-	dmgCompile ':hfsx@jar'
-	dmgCompile ':hfsx_dmglib@jar'
+	dmgImplementation ':csframework@jar'
+	dmgImplementation ':hfsx@jar'
+	dmgImplementation ':hfsx_dmglib@jar'
 }
-
 
 /***************************************************************************************
  *
- * Task to create the dmg.jar file
+ * Task to create the DMG.jar file
  *
  ***************************************************************************************/
-task dmgJar(type: Jar) {
-	from sourceSets.dmg.output
-	destinationDir = file("build/data/lib")
-	baseName = 'dmg'
-}
 
 jar {
-	doLast {
-		File f = file("build/libs/DMG.jar")
-		delete "build/libs"
-	}
+	destinationDirectory = file("build/data/lib")
+	from sourceSets.dmg.output
 }
-
-/***************************************************************************************
- *
- * plugin the jar task into global task for building and zipping contribs
- *
- ***************************************************************************************/
-assemble.dependsOn dmgJar
-
-

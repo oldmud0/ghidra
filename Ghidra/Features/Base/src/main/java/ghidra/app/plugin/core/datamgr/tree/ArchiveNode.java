@@ -22,7 +22,6 @@ import javax.swing.Icon;
 import docking.widgets.tree.GTree;
 import docking.widgets.tree.GTreeNode;
 import ghidra.app.plugin.core.datamgr.archive.Archive;
-import ghidra.app.plugin.core.datamgr.archive.SourceArchive;
 import ghidra.program.model.data.*;
 import ghidra.util.task.SwingUpdateManager;
 
@@ -32,15 +31,17 @@ public class ArchiveNode extends CategoryNode {
 	protected ArchiveNodeCategoryChangeListener listener;
 	private DataTypeManager dataTypeManager; // may be null
 
-	public ArchiveNode(Archive archive) {
+	public ArchiveNode(Archive archive, ArrayPointerFilterState filterState) {
 		this(archive, archive.getDataTypeManager() == null ? null
-				: archive.getDataTypeManager().getRootCategory());
+				: archive.getDataTypeManager().getRootCategory(),
+			filterState);
 		this.dataTypeManager = archive.getDataTypeManager();
-		installDataTypeManagerListener();
+		updateDataTypeManager();
 	}
 
-	protected ArchiveNode(Archive archive, Category rootCategory) {
-		super(rootCategory);
+	protected ArchiveNode(Archive archive, Category rootCategory,
+			ArrayPointerFilterState filterState) {
+		super(rootCategory, filterState);
 		this.archive = archive;
 	}
 
@@ -49,23 +50,41 @@ public class ArchiveNode extends CategoryNode {
 	}
 
 	protected void dataTypeManagerChanged() {
-		installDataTypeManagerListener();
-		// old children are no longer valid--clear the cache and fire a node structure changed event
-		removeAll();
-		nodeChanged(); // notify that this nodes display data has changed
-		structureChanged(); // notify that his children have been refreshed and the tree cache needs to be wiped.
+		updateDataTypeManager();
 
+		// old children are no longer valid--clear the cache and fire a node structure changed event
+		structureChanged(); // notify children have been refreshed; tree cache needs to be cleared
+		nodeChanged(); // notify that this nodes display data has changed
+	}
+
+	// override clone to install the needed listeners
+	@Override
+	public GTreeNode clone() throws CloneNotSupportedException {
+		ArchiveNode clone = (ArchiveNode) super.clone();
+		clone.installDataTypeManagerListener();
+		return clone;
 	}
 
 	protected void installDataTypeManagerListener() {
 		if (dataTypeManager == null) {
 			return; // some nodes do not have DataTypeManagers, like InvalidFileArchives
 		}
-
-		dataTypeManager.removeDataTypeManagerListener(listener);
-		dataTypeManager = archive.getDataTypeManager();
 		listener = new ArchiveNodeCategoryChangeListener();
 		dataTypeManager.addDataTypeManagerListener(listener);
+	}
+
+	protected void updateDataTypeManager() {
+		if (dataTypeManager == null) {
+			return; // some nodes do not have DataTypeManagers, like InvalidFileArchives
+		}
+
+		if (listener != null) {
+			dataTypeManager.removeDataTypeManagerListener(listener);
+			listener.dispose();
+		}
+
+		dataTypeManager = archive.getDataTypeManager();
+		installDataTypeManagerListener();
 		setCategory(dataTypeManager.getRootCategory());
 	}
 
@@ -112,8 +131,7 @@ public class ArchiveNode extends CategoryNode {
 	}
 
 	public void structureChanged() {
-		removeAll();
-		getTree().scheduleFilterTask(this);
+		setChildren(null);
 	}
 
 	public void nodeChanged() {
@@ -206,7 +224,7 @@ public class ArchiveNode extends CategoryNode {
 	public CategoryNode findCategoryNode(Category localCategory, boolean loadChildren) {
 
 		// if we don't have to loadChildren and we are not loaded get out.
-		if (!loadChildren && !isChildrenLoadedOrInProgress()) {
+		if (!loadChildren && !isLoaded()) {
 			return null;
 		}
 
@@ -223,12 +241,12 @@ public class ArchiveNode extends CategoryNode {
 			return null;
 		}
 
-		CategoryNode node = findCategoryNode(parentCategory);
+		CategoryNode node = findCategoryNode(parentCategory, loadChildren);
 		if (node == null) {
 			return null;
 		}
 
-		List<GTreeNode> children = node.getAllChildren();
+		List<GTreeNode> children = node.getChildren();
 		for (GTreeNode child : children) {
 			if (!(child instanceof CategoryNode)) {
 				continue;

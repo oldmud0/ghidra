@@ -35,6 +35,7 @@ import docking.widgets.fieldpanel.FieldPanel;
 import docking.widgets.fieldpanel.Layout;
 import docking.widgets.fieldpanel.field.Field;
 import docking.widgets.fieldpanel.support.BackgroundColorModel;
+import docking.widgets.label.GDLabel;
 import ghidra.app.plugin.core.codebrowser.hover.ListingHoverService;
 import ghidra.app.plugin.core.functiongraph.FunctionGraphPlugin;
 import ghidra.app.plugin.core.functiongraph.graph.FGEdge;
@@ -197,13 +198,24 @@ public class ListingGraphComponentPanel extends AbstractGraphComponentPanel {
 
 	private void createListingPanelToolTipComponent() {
 		JPanel panel = new JPanel(new BorderLayout());
-		previewListingPanel =
-			new FGVertexListingPanel(controller, getFormatManager(true), program, addressSet);
+
+		FunctionGraphOptions options = controller.getFunctionGraphOptions();
+		boolean useFullSizeTooltip = options.useFullSizeTooltip();
+		previewListingPanel = new FGVertexListingPanel(controller,
+			getFormatManager(useFullSizeTooltip), program, addressSet);
 		previewListingPanel.setTextBackgroundColor(FGVertex.TOOLTIP_BACKGROUND_COLOR);
 		//            previewListingPanel.getFieldPanel().setSelectionMode( FieldPanel.NO_SELECTION );
 		previewListingPanel.getFieldPanel().setCursorOn(false);
 
-		tooltipTitleLabel = new JLabel();
+		// keep the tooltip window from getting too big; use an arbitrary, reasonable max
+		Dimension maxSize = new Dimension(700, 400);
+		previewListingPanel.setMaximumSize(maxSize);
+		Dimension preferredSize = previewListingPanel.getPreferredSize();
+		preferredSize.width = Math.min(maxSize.width, preferredSize.width);
+		preferredSize.height = Math.min(maxSize.height, preferredSize.height);
+		previewListingPanel.setPreferredSize(preferredSize);
+
+		tooltipTitleLabel = new GDLabel();
 		tooltipTitleLabel.setHorizontalAlignment(SwingConstants.LEADING);
 		tooltipTitleLabel.setBackground(FGVertex.TOOLTIP_BACKGROUND_COLOR);
 		tooltipTitleLabel.setOpaque(true);
@@ -238,6 +250,20 @@ public class ListingGraphComponentPanel extends AbstractGraphComponentPanel {
 		// make sure the title stays up-to-date with the symbol at the start address
 		title = createTitle();
 		genericHeader.setTitle(title);
+		previewListingPanel = null;
+
+		updateDefaultBackgroundColor();
+	}
+
+	private void updateDefaultBackgroundColor() {
+		FunctionGraphOptions options = controller.getFunctionGraphOptions();
+		Color newBgColor = options.getDefaultVertexBackgroundColor();
+		if (!defaultBackgroundColor.equals(newBgColor)) {
+			defaultBackgroundColor = newBgColor;
+			if (userDefinedColor == null) {
+				listingPanel.setTextBackgroundColor(defaultBackgroundColor);
+			}
+		}
 	}
 
 	@Override
@@ -259,6 +285,11 @@ public class ListingGraphComponentPanel extends AbstractGraphComponentPanel {
 	@Override
 	Color getBackgroundColor() {
 		return listingPanel.getTextBackgroundColor();
+	}
+
+	@Override
+	Color getSelectionColor() {
+		return fieldPanel.getSelectionColor();
 	}
 
 	private void createActions() {
@@ -371,6 +402,11 @@ public class ListingGraphComponentPanel extends AbstractGraphComponentPanel {
 	@Override
 	ProgramSelection getProgramSelection() {
 		return listingPanel.getProgramSelection();
+	}
+
+	@Override
+	String getTextSelection() {
+		return listingPanel.getTextSelection();
 	}
 
 	@Override
@@ -487,7 +523,7 @@ public class ListingGraphComponentPanel extends AbstractGraphComponentPanel {
 		if (address == null) {
 			// This is an unusual case.   For now, do something reasonable.
 			String side = isDestinationVertex ? "end" : "start";
-			toolTipComponent = new JLabel("Unable to find address for edge " + side + ": " + edge);
+			toolTipComponent = new GDLabel("Unable to find address for edge " + side + ": " + edge);
 			toolTipComponent.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 10));
 			if (previewListingPanel != null) {
 				previewListingPanel = null;
@@ -504,8 +540,9 @@ public class ListingGraphComponentPanel extends AbstractGraphComponentPanel {
 			tooltipTitleLabel.setText("From: " + getTitle());
 		}
 
-		previewListingPanel.getFieldPanel().setBackgroundColorModel(
-			new HighlightingColorModel(address, getColorForEdge(edge)));
+		previewListingPanel.getFieldPanel()
+				.setBackgroundColorModel(
+					new HighlightingColorModel(address, getColorForEdge(edge)));
 	}
 
 	private void initializeToolTipComponent(Address goToAddress) {

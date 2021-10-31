@@ -16,8 +16,7 @@
 package ghidra.app.util.bean;
 
 import java.awt.*;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
+import java.awt.event.*;
 import java.util.*;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -28,7 +27,12 @@ import javax.swing.table.TableColumnModel;
 import org.apache.commons.lang3.StringUtils;
 
 import docking.DialogComponentProvider;
+import docking.actions.KeyBindingUtils;
+import docking.widgets.button.GRadioButton;
+import docking.widgets.checkbox.GCheckBox;
 import docking.widgets.filter.FilterListener;
+import docking.widgets.label.GDLabel;
+import docking.widgets.label.GLabel;
 import docking.widgets.table.GTableCellRenderingData;
 import ghidra.app.context.ListingActionContext;
 /**
@@ -45,7 +49,6 @@ import ghidra.app.context.ListingActionContext;
  */
 import ghidra.app.services.DataTypeManagerService;
 import ghidra.framework.plugintool.PluginTool;
-import ghidra.generic.function.Callback;
 import ghidra.program.database.symbol.EquateManager;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.program.model.data.Enum;
@@ -58,6 +61,7 @@ import ghidra.util.UniversalID;
 import ghidra.util.layout.HorizontalLayout;
 import ghidra.util.layout.VerticalLayout;
 import ghidra.util.table.*;
+import utility.function.Callback;
 
 public class SetEquateDialog extends DialogComponentProvider {
 	public static final int CANCELED = 0;
@@ -88,10 +92,9 @@ public class SetEquateDialog extends DialogComponentProvider {
 	/**
 	 * Constructor
 	 *
-	 * @param parent the parent frame to host the dialog.
-	 * @param plugin the EquatePlugin that launched this dialog(used to validate input)
-	 * @param labelText a text string indicating the numeric value being equated.
-	 * @param equates a list of equates that already exist for this numeric value.
+	 * @param tool the EquatePlugin that launched this dialog(used to validate input)
+	 * @param program the program the equate is located in.
+	 * @param value the equate value to set.
 	 */
 
 	public SetEquateDialog(PluginTool tool, Program program, Scalar value) {
@@ -217,29 +220,25 @@ public class SetEquateDialog extends DialogComponentProvider {
 		return entries;
 	}
 
-	/**
+	/*
 	 * Builds the main panel of the dialog and returns it.
 	 */
 	protected JPanel buildMainPanel() {
 
-		titleLabel = new JLabel("Possible Matches");
+		titleLabel = new GDLabel("Possible Matches");
 		titleLabel.setBorder(BorderFactory.createEmptyBorder(10, 0, 0, 0));
 
 		//long value = scalar.getSignedValue();
-		String labelText = "Scalar Value:  " + scalar.toString(16, false, true, "0x", "") + " (" +
-			scalar.toString(10, false, true, "", "") + ")";
-		JLabel label = new JLabel(labelText);
-		label.setName("EquateField");
-		applyToCurrent = new JRadioButton("Current location", true);
+		applyToCurrent = new GRadioButton("Current location", true);
 		applyToCurrent.setName("applyToCurrent");
 		applyToCurrent.setToolTipText("Apply to current scalar operand only");
 
-		applyToSelection = new JRadioButton("Current selection", false);
+		applyToSelection = new GRadioButton("Current selection", false);
 		applyToSelection.setName("applyToSelection");
 		applyToSelection.setToolTipText(
 			"Apply to all matching, defined scalar code " + "units in current selection.");
 
-		applyToAll = new JRadioButton("Entire program", false);
+		applyToAll = new GRadioButton("Entire program", false);
 		applyToAll.setName("applyToAll");
 		applyToAll.setToolTipText(
 			"Apply to all matching, defined scalar code units " + "in entire program.");
@@ -249,7 +248,7 @@ public class SetEquateDialog extends DialogComponentProvider {
 		group.add(applyToSelection);
 		group.add(applyToAll);
 
-		overwriteExistingEquates = new JCheckBox("Overwrite existing equates", false);
+		overwriteExistingEquates = new GCheckBox("Overwrite existing equates", false);
 		overwriteExistingEquates.setName("Overwrite");
 		overwriteExistingEquates.setEnabled(false);
 		overwriteExistingEquates.setToolTipText("If checked, apply equates to all unmarked " +
@@ -275,10 +274,18 @@ public class SetEquateDialog extends DialogComponentProvider {
 		suggestedEquatesTable = new GhidraTable(model);
 		suggestedEquatesTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 
-		JPanel tablePanel = new JPanel(new BorderLayout());
-		JScrollPane scrollPane = new JScrollPane(suggestedEquatesTable);
-		tablePanel.add(scrollPane);
+		// allows users to press enter in the table to accept the current selection
+		KeyStroke enter = KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0);
+		AbstractAction action = new AbstractAction() {
+			@Override
+			public void actionPerformed(ActionEvent e) {
+				okCallback();
+			}
+		};
+		KeyBindingUtils.registerAction(suggestedEquatesTable, enter, action,
+			JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
 
+		// allows users to double-click a row to accept the item
 		suggestedEquatesTable.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mouseReleased(MouseEvent e) {
@@ -290,9 +297,12 @@ public class SetEquateDialog extends DialogComponentProvider {
 				}
 			}
 		});
+
+		JPanel tablePanel = new JPanel(new BorderLayout());
+		JScrollPane scrollPane = new JScrollPane(suggestedEquatesTable);
+		tablePanel.add(scrollPane);
 		tablePanel.setBorder(BorderFactory.createEmptyBorder(2, 5, 5, 5));
 
-		label.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
 		filterPanel =
 			new GhidraTableFilterPanel<>(suggestedEquatesTable, model, " Equate String: ");
 		model.addTableModelListener(evt -> updateFilter());
@@ -307,6 +317,11 @@ public class SetEquateDialog extends DialogComponentProvider {
 		filterPanel.addEnterListener(enterListener);
 
 		JPanel northPanel = new JPanel(new VerticalLayout(2));
+		String labelText = "Scalar Value:  " + scalar.toString(16, false, true, "0x", "") + " (" +
+			scalar.toString(10, false, true, "", "") + ")";
+		JLabel label = new GLabel(labelText);
+		label.setName("EquateField");
+		label.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
 		northPanel.add(label);
 		northPanel.add(titleLabel);
 		northPanel.add(filterPanel);
@@ -315,7 +330,7 @@ public class SetEquateDialog extends DialogComponentProvider {
 		JPanel scopePanel = new JPanel(new HorizontalLayout(2));
 		scopePanel.setBorder(BorderFactory.createEmptyBorder(10, 5, 0, 5));
 
-		scopePanel.add(new JLabel("Apply To: "));
+		scopePanel.add(new GLabel("Apply To: "));
 		scopePanel.add(applyToCurrent);
 		scopePanel.add(applyToSelection);
 		scopePanel.add(applyToAll);
@@ -323,7 +338,7 @@ public class SetEquateDialog extends DialogComponentProvider {
 		JPanel optionsPanel = new JPanel(new HorizontalLayout(2));
 		optionsPanel.setBorder(BorderFactory.createEmptyBorder(0, 5, 0, 5));
 
-		optionsPanel.add(new JLabel("Options: "));
+		optionsPanel.add(new GLabel("Options: "));
 		optionsPanel.add(overwriteExistingEquates);
 
 		JPanel southPanel = new JPanel(new VerticalLayout(0));
@@ -355,7 +370,7 @@ public class SetEquateDialog extends DialogComponentProvider {
 		result = CANCELED;
 		overwriteExistingEquates.setVisible(true);
 		setTitle("Set Equate");
-		tool.showDialog(this, (Component) null);
+		tool.showDialog(this);
 		return result;
 	}
 
@@ -371,11 +386,11 @@ public class SetEquateDialog extends DialogComponentProvider {
 		overwriteExistingEquates.setVisible(false);
 		overwriteExistingEquates.setEnabled(false);
 		setTitle("Rename Equate");
-		tool.showDialog(this, (Component) null);
+		tool.showDialog(this);
 		return result;
 	}
 
-	/**
+	/*
 	 * Get the Equate Name entered or chosen by the user.
 	 */
 	public String getEquateName() {
@@ -438,7 +453,7 @@ public class SetEquateDialog extends DialogComponentProvider {
 	/**
 	 * Returns the type of selection the user has chosen.
 	 *
-	 * @return
+	 * @return the selection type
 	 */
 	public SelectionType getSelectionType() {
 		if (applyToAll.isSelected()) {
@@ -455,7 +470,7 @@ public class SetEquateDialog extends DialogComponentProvider {
 	/**
 	 * Returns true if the user has chosen to overwrite any existing equate rules.
 	 *
-	 * @return
+	 * @return true if the user has chosen to overwrite any existing equate rules. 
 	 */
 	public boolean getOverwriteExisting() {
 		return overwriteExistingEquates.isSelected();
@@ -477,7 +492,19 @@ public class SetEquateDialog extends DialogComponentProvider {
 	}
 
 	/**
+	 * For using the dialog outside of the EquatePlugin, the "Apply to Current" radio button
+	 * can be selected and the other buttons disabled.
+	 */
+	public void disableHasSelection() {
+		applyToAll.setEnabled(false);
+		applyToSelection.setEnabled(false);
+		applyToSelection.setSelected(false);
+		overwriteExistingEquates.setEnabled(false);
+	}
+
+	/**
 	 * Sets the dialogs status display to the given message.
+	 * @param text the text
 	 */
 	void setStatus(String text) {
 		this.setStatusText(text);

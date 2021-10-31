@@ -35,11 +35,6 @@ class MSRichProductIDDataType extends DataTypeImpl {
 	}
 
 	@Override
-	public boolean isDynamicallySized() {
-		return false;
-	}
-
-	@Override
 	public DataType clone(DataTypeManager dtm) {
 		if (dtm == getDataTypeManager()) {
 			return this;
@@ -58,7 +53,7 @@ class MSRichProductIDDataType extends DataTypeImpl {
 	}
 
 	@Override
-	public void setName(String name) throws InvalidNameException, DuplicateNameException {
+	public void setName(String name) throws InvalidNameException {
 		// ignored
 	}
 
@@ -92,7 +87,7 @@ class MSRichProductIDDataType extends DataTypeImpl {
 	public String getRepresentation(MemBuffer buf, Settings settings, int length) {
 
 		return compid.getProductDescription();
-		
+
 	}
 
 	@Override

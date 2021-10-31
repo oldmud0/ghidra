@@ -1,4 +1,19 @@
-#!/bin/bash
+#!/usr/bin/env bash
+## ###
+#  IP: GHIDRA
+# 
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#  
+#       http://www.apache.org/licenses/LICENSE-2.0
+#  
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+##
 
 umask 027
 
@@ -71,7 +86,15 @@ if [[ ${INDEX} -lt 5 ]]; then
 	exit 1
 fi
 
+# Sets SUPPORT_DIR to the directory that contains this file (launch.sh)
 SUPPORT_DIR="${0%/*}"
+
+# Ensure Ghidra path doesn't contain illegal characters
+if [[ "$SUPPORT_DIR" = *"!"* ]]; then
+	echo "Ghidra path cannot contain a \"!\" character."
+	exit 1
+fi
+
 if [ -f "${SUPPORT_DIR}/launch.properties" ]; then
 
 	# Production Environment
@@ -86,6 +109,10 @@ else
 	CPATH="${INSTALL_DIR}/Ghidra/Framework/Utility/bin/main"
 	LS_CPATH="${INSTALL_DIR}/GhidraBuild/LaunchSupport/bin/main"
 	DEBUG_LOG4J="${INSTALL_DIR}/Ghidra/RuntimeScripts/Common/support/debug.log4j.xml"
+	if ! [ -d "${LS_CPATH}" ]; then
+		echo "Ghidra cannot launch in development mode because Eclipse has not compiled its class files."
+		exit 1
+	fi
 fi
 
 # Make sure some kind of java is on the path.  It's required to run the LaunchSupport program.
@@ -116,17 +143,6 @@ VMARG_LIST+=" $(java -cp "${LS_CPATH}" LaunchSupport "${INSTALL_DIR}" -vmargs)"
 # Add extra macOS VM arguments
 if [ "$(uname -s)" = "Darwin" ]; then
 	VMARG_LIST+=" -Xdock:name=${APPNAME}"
-	VMARG_LIST+=" -Xdock:icon=\"${INSTALL_DIR}/Ghidra/Features/Base/os/osx64/ghidra.icns\""
-	
-	# Eclipse on macOS (Darwin) can have file locking issues if the user home directory is 
-	# networked.  Therefore, we will disable file locking by default for macOS. Comment the 
-	# following line out if Eclipse file locking is needed and known to work.
-	VMARG_LIST+=" -Declipse.filelock.disable=true"
-fi
-
-# Add extra Linux VM arguments
-if [ "$(uname -s)" = "Linux" ]; then
-	VMARG_LIST+=" -Dawt.useSystemAAFontSettings=on"
 fi
 
 # Set Max Heap Size if specified
@@ -147,12 +163,10 @@ if [ "${MODE}" = "debug" ] || [ "${MODE}" = "debug-suspend" ]; then
 	if [ "${MODE}" = "debug-suspend" ]; then
 		SUSPEND=y
 	fi
-	
-	VMARG_LIST+=" -Xdebug"
-	VMARG_LIST+=" -Xnoagent" 
-	VMARG_LIST+=" -Djava.compiler=NONE" 
+	 
 	VMARG_LIST+=" -Dlog4j.configuration=\"${DEBUG_LOG4J}\""  
-	VMARG_LIST+=" -Xrunjdwp:transport=dt_socket,server=y,suspend=${SUSPEND},address=${DEBUG_ADDRESS}"
+	VMARG_LIST+=" -agentlib:jdwp=transport=dt_socket,server=y,suspend=${SUSPEND},address=${DEBUG_ADDRESS}"
+	
 
 elif [ "${MODE}" = "fg" ]; then
 	:

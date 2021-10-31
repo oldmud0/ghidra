@@ -51,7 +51,7 @@ public class DecompilerManager {
 		this.decompilerController = decompilerController;
 
 		runManager = new RunManager("Decompiler", null);
-		decompiler = new Decompiler(options, options.getDefaultTimeout());
+		decompiler = new Decompiler(options, 0);
 
 		updateManager = new SwingUpdateManager(500, () -> doPendingDecompile());
 	}
@@ -69,6 +69,14 @@ public class DecompilerManager {
 	 */
 	JComponent getTaskMonitorComponent() {
 		return runManager.getMonitorComponent();
+	}
+
+	/**
+	 * Resets the native decompiler process.  Call this method when the decompiler's view
+	 * of a program has been invalidated, such as when a new overlay space has been added.
+	 */
+	public void resetDecompiler() {
+		decompiler.resetDecompiler();
 	}
 
 	/**

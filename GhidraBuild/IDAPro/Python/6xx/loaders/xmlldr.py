@@ -1,3 +1,18 @@
+## ###
+#  IP: GHIDRA
+# 
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#  
+#       http://www.apache.org/licenses/LICENSE-2.0
+#  
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+##
 #---------------------------------------------------------------------
 # xmlldr.py - IDA XML Import loader and plugin
 #---------------------------------------------------------------------
@@ -6,6 +21,7 @@ Loader and plugin for IDA to import a XML PROGRAM file to a database.
 """
 
 import idaapi
+import sys
 import time
 from xml.etree import cElementTree
 
@@ -1519,7 +1535,7 @@ class XmlImporter:
             if self.has_attribute(structure, NAMESPACE) == False:
                 return
             namespace = self.get_attribute(structure, NAMESPACE)
-            name = namspace + '__' + name
+            name = namespace + '__' + name
             name.replace('/','_')
             name.replace('.','_')
             dtyp = idaapi.get_struc_id(name)
@@ -1589,7 +1605,7 @@ class XmlImporter:
             if self.has_attribute(union, NAMESPACE) == False:
                 return
             namespace = self.get_attribute(union, NAMESPACE)
-            name = namspace + '__' + name
+            name = namespace + '__' + name
             name.replace('/','_')
             name.replace('.','_')
             dtyp = idaapi.get_struc_id(name)

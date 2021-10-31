@@ -98,9 +98,15 @@ public class OmfArchiveFileSystem implements GFileSystem {
 	public InputStream getInputStream(GFile file, TaskMonitor monitor)
 			throws IOException, CancelledException {
 
+		ByteProvider bp = getByteProvider(file, monitor);
+		return bp != null ? bp.getInputStream(0) : null;
+	}
+
+	public ByteProvider getByteProvider(GFile file, TaskMonitor monitor) {
 		OmfLibraryRecord.MemberHeader member = fsih.getMetadata(file);
 		return (member != null)
-				? new ByteProviderInputStream(provider, member.payloadOffset, member.size)
+				? new ByteProviderWrapper(provider, member.payloadOffset, member.size,
+					file.getFSRL())
 				: null;
 	}
 
@@ -110,7 +116,7 @@ public class OmfArchiveFileSystem implements GFileSystem {
 	}
 
 	@Override
-	public String getInfo(GFile file, TaskMonitor monitor) throws IOException {
+	public String getInfo(GFile file, TaskMonitor monitor) {
 		OmfLibraryRecord.MemberHeader entry = fsih.getMetadata(file);
 		return (entry == null) ? null : FSUtilities.infoMapToString(getInfoMap(entry));
 	}

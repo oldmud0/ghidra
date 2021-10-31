@@ -18,7 +18,7 @@ package ghidra.program.database.symbol;
 import java.io.IOException;
 import java.util.Iterator;
 
-import db.Record;
+import db.DBRecord;
 import db.RecordIterator;
 import ghidra.program.database.util.Query;
 import ghidra.program.database.util.QueryRecordIterator;
@@ -44,7 +44,7 @@ class AddressSetFilteredSymbolIterator implements SymbolIterator {
 	/**
 	 * Construct a new AddressSetFilteredSymbolIterator.
 	 * @param symbolMgr the symbol manager
-	 * @param set the address set to iterator over.
+	 * @param set the address set to iterator over (required).
 	 * @param query the query to use as a filter
 	 * @param forward the direction of the iterator.
 	 */
@@ -82,7 +82,7 @@ class AddressSetFilteredSymbolIterator implements SymbolIterator {
 
 	private void findNext() throws IOException {
 		if (recIter != null && recIter.hasNext()) {
-			Record rec = recIter.next();
+			DBRecord rec = recIter.next();
 			currentSymbol = symbolMgr.getSymbol(rec);
 		}
 		else {
@@ -92,7 +92,7 @@ class AddressSetFilteredSymbolIterator implements SymbolIterator {
 					adapter.getSymbols(range.getMinAddress(), range.getMaxAddress(), forward);
 				recIter = new QueryRecordIterator(it, query, forward);
 				if (recIter.hasNext()) {
-					Record rec = recIter.next();
+					DBRecord rec = recIter.next();
 					currentSymbol = symbolMgr.getSymbol(rec);
 					break;
 				}

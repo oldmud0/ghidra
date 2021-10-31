@@ -17,8 +17,6 @@ package ghidra.app.plugin.core.function.editor;
 
 import java.util.*;
 
-import javax.swing.SwingUtilities;
-
 import ghidra.app.services.DataTypeManagerService;
 import ghidra.app.util.cparser.C.ParseException;
 import ghidra.app.util.parser.FunctionSignatureParser;
@@ -30,8 +28,7 @@ import ghidra.program.model.listing.Function.FunctionUpdateType;
 import ghidra.program.model.pcode.Varnode;
 import ghidra.program.model.symbol.SourceType;
 import ghidra.program.model.symbol.SymbolUtilities;
-import ghidra.util.Msg;
-import ghidra.util.SystemUtilities;
+import ghidra.util.*;
 import ghidra.util.exception.*;
 
 public class FunctionEditorModel {
@@ -84,14 +81,6 @@ public class FunctionEditorModel {
 	void setModelChangeListener(ModelChangeListener listener) {
 		this.listener = listener;
 	}
-
-//	public FunctionEditorModel(DataTypeManagerService service, Function function,
-//			ModelChangeListener listener, FunctionDefinitionDataType functionDef,
-//			String callingConv) {
-//		this(service, function, listener);
-//		callingConventionName = callingConv;
-//		setFunctionData(functionDef);
-//	}
 
 	// Returns the current calling convention or the default calling convention if current unknown
 	private PrototypeModel getEffectiveCallingConvention() {
@@ -192,18 +181,10 @@ public class FunctionEditorModel {
 	private void notifyDataChanged(boolean functionDataChanged) {
 		this.modelChanged |= functionDataChanged;
 		validate();
-
-		SwingUtilities.invokeLater(() -> listener.dataChanged());
+		if (listener != null) {
+			Swing.runLater(() -> listener.dataChanged());
+		}
 	}
-
-//	private void notifyParsingModeChanged() {
-//		SwingUtilities.invokeLater(new Runnable() {
-//			@Override
-//			public void run() {
-//				listener.parsingModeChanged();
-//			}
-//		});
-//	}
 
 	private void validate() {
 		statusText = "";
@@ -236,7 +217,7 @@ public class FunctionEditorModel {
 			returnType = ((TypeDef) returnType).getBaseDataType();
 		}
 		if (storageSize > 0 && (returnType instanceof AbstractFloatDataType)) {
-			return true; // dont constrain float storage size
+			return true; // don't constrain float storage size
 		}
 
 		int returnDataTypeSize = returnType.getLength();
@@ -405,7 +386,7 @@ public class FunctionEditorModel {
 	}
 
 	public String getFunctionSignatureTextFromModel() {
-		StringBuffer buf = new StringBuffer();
+		StringBuilder buf = new StringBuilder();
 		buf.append(returnInfo.getFormalDataType().getName()).append(" ");
 		buf.append(getNameString());
 		buf.append(" (");
@@ -494,7 +475,6 @@ public class FunctionEditorModel {
 	 * Get the effective function to which changes will be made.  This
 	 * will be the same as function unless it is a thunk in which case
 	 * the returned function will be the ultimate non-thunk function.
-	 * @param function
 	 * @return non-thunk function
 	 */
 	private Function getAffectiveFunction() {
@@ -580,7 +560,9 @@ public class FunctionEditorModel {
 	}
 
 	public void addParameter() {
-		listener.tableRowsChanged();
+		if (listener != null) {
+			listener.tableRowsChanged();
+		}
 		ParamInfo param = new ParamInfo(this, null, DataType.DEFAULT,
 			VariableStorage.UNASSIGNED_STORAGE, parameters.size());
 		parameters.add(param);
@@ -608,9 +590,9 @@ public class FunctionEditorModel {
 				ParamInfo paramInfo = parameters.get(i);
 				DataType dt = paramInfo.getDataType();
 				VariableStorage storage = paramInfo.getStorage();
+				signatureTransformed |= storage.isAutoStorage();
 				paramInfo.setFormalDataType(dt);
 				paramInfo.setStorage(storage.clone(program));
-				signatureTransformed = true;
 			}
 		}
 		catch (InvalidInputException e) {
@@ -660,7 +642,8 @@ public class FunctionEditorModel {
 				try {
 					if (autoParamCount < oldAutoCount) {
 						if (oldParams.get(
-							autoParamCount).getStorage().getAutoParameterType() != storage.getAutoParameterType()) {
+							autoParamCount).getStorage().getAutoParameterType() != storage
+									.getAutoParameterType()) {
 							adjustSelectionForRowRemoved(i);
 						}
 					}
@@ -697,7 +680,9 @@ public class FunctionEditorModel {
 		if (!canRemoveParameters()) {
 			throw new AssertException("Attempted to remove parameters when not allowed.");
 		}
-		listener.tableRowsChanged();
+		if (listener != null) {
+			listener.tableRowsChanged();
+		}
 		Arrays.sort(selectedFunctionRows);
 		for (int i = selectedFunctionRows.length - 1; i >= 0; i--) {
 			int index = selectedFunctionRows[i];
@@ -719,7 +704,9 @@ public class FunctionEditorModel {
 		if (!canMoveParameterUp()) {
 			throw new AssertException("Attempted to move parameters up when not allowed.");
 		}
-		listener.tableRowsChanged();
+		if (listener != null) {
+			listener.tableRowsChanged();
+		}
 		int paramIndex = selectedFunctionRows[0] - 1;  // first row is return value 
 		ParamInfo param = parameters.remove(paramIndex);
 		parameters.add(paramIndex - 1, param);
@@ -733,7 +720,9 @@ public class FunctionEditorModel {
 		if (!canMoveParameterDown()) {
 			throw new AssertException("Attempted to move parameters down when not allowed.");
 		}
-		listener.tableRowsChanged();
+		if (listener != null) {
+			listener.tableRowsChanged();
+		}
 		int paramIndex = selectedFunctionRows[0] - 1;
 		ParamInfo param = parameters.remove(paramIndex);
 		parameters.add(paramIndex + 1, param);
@@ -973,12 +962,11 @@ public class FunctionEditorModel {
 			if (!paramsOrReturnModified) {
 
 				// change param names without impacting signature source
-				for (int i = 0; i < parameters.size(); i++) {
-					ParamInfo paramInfo = parameters.get(i);
+				for (ParamInfo paramInfo : parameters) {
 					if (!paramInfo.isAutoParameter() && paramInfo.isNameModified()) {
 						Parameter param = paramInfo.getOriginalParameter();
 						if (param != null) {
-							if (!param.getSymbol().checkIsValid()) {
+							if (param.getSymbol().isDeleted()) {
 								// concurrent removal of param - must do full update
 								paramsOrReturnModified = true;
 								break;
@@ -991,8 +979,7 @@ public class FunctionEditorModel {
 
 			if (paramsOrReturnModified) {
 				List<Parameter> params = new ArrayList<>();
-				for (int i = 0; i < parameters.size(); i++) {
-					ParamInfo paramInfo = parameters.get(i);
+				for (ParamInfo paramInfo : parameters) {
 					if (paramInfo.isAutoParameter()) {
 						continue;
 					}
@@ -1173,9 +1160,13 @@ public class FunctionEditorModel {
 		setSignatureFieldText(getFunctionSignatureTextFromModel());
 	}
 
-	public void parseSignatureFieldText() throws ParseException {
+	public boolean hasChanges() {
+		return !Objects.equals(getFunctionSignatureTextFromModel(), signatureFieldText);
+	}
+
+	public void parseSignatureFieldText() throws ParseException, CancelledException {
 		FunctionSignatureParser parser =
-			new FunctionSignatureParser(getProgram(), dataTypeManagerService);
+			new FunctionSignatureParser(program.getDataTypeManager(), dataTypeManagerService);
 		FunctionDefinitionDataType f = parser.parse(function.getSignature(), signatureFieldText);
 
 		setFunctionData(f);

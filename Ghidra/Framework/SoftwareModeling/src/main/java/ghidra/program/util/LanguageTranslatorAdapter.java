@@ -215,8 +215,8 @@ public abstract class LanguageTranslatorAdapter implements LanguageTranslator {
 
 		if (!oldSpaces.isEmpty()) {
 //			spaceMap = null;
-			throw new IncompatibleLanguageException("Failed to map one or more address spaces: " +
-				oldSpaces);
+			throw new IncompatibleLanguageException(
+				"Failed to map one or more address spaces: " + oldSpaces);
 		}
 
 	}
@@ -333,7 +333,8 @@ public abstract class LanguageTranslatorAdapter implements LanguageTranslator {
 	}
 
 	protected boolean isSameRegisterConstruction(Register oldReg, Register newReg) {
-		if (oldReg.getLeastSignificatBitInBaseRegister() != newReg.getLeastSignificatBitInBaseRegister() ||
+		if (oldReg.getLeastSignificatBitInBaseRegister() != newReg
+				.getLeastSignificatBitInBaseRegister() ||
 			oldReg.getBitLength() != newReg.getBitLength()) {
 			return false;
 		}
@@ -424,9 +425,9 @@ public abstract class LanguageTranslatorAdapter implements LanguageTranslator {
 					return false;
 				}
 				Register newContextReg = getNewLanguage().getContextBaseRegister();
-				if (newContextReg != null) {
+				if (newContextReg != Register.NO_CONTEXT) {
 					Register oldContextReg = getOldLanguage().getContextBaseRegister();
-					if (oldContextReg == null ||
+					if (oldContextReg == Register.NO_CONTEXT ||
 						!isSameRegisterConstruction(oldContextReg, newContextReg)) {
 						Msg.error(this, "Translator can not map context register: " + this);
 						return false;
@@ -522,12 +523,10 @@ class TemporaryCompilerSpec implements CompilerSpec {
 			throws CompilerSpecNotFoundException {
 		this.translator = translator;
 		this.oldCompilerSpecID = oldCompilerSpecID;
-		newCompilerSpec =
-			translator.getNewLanguage().getCompilerSpecByID(
-				translator.getNewCompilerSpecID(oldCompilerSpecID));
-		description =
-			new BasicCompilerSpecDescription(oldCompilerSpecID,
-				newCompilerSpec.getCompilerSpecDescription().getCompilerSpecName());
+		newCompilerSpec = translator.getNewLanguage()
+				.getCompilerSpecByID(translator.getNewCompilerSpecID(oldCompilerSpecID));
+		description = new BasicCompilerSpecDescription(oldCompilerSpecID,
+			newCompilerSpec.getCompilerSpecDescription().getCompilerSpecName());
 	}
 
 	@Override
@@ -540,16 +539,6 @@ class TemporaryCompilerSpec implements CompilerSpec {
 	}
 
 	@Override
-	public int getCallStackMod() {
-		return newCompilerSpec.getCallStackMod();
-	}
-
-	@Override
-	public int getCallStackShift() {
-		return newCompilerSpec.getCallStackShift();
-	}
-
-	@Override
 	public PrototypeModel[] getCallingConventions() {
 		return new PrototypeModel[0];
 	}
@@ -557,6 +546,11 @@ class TemporaryCompilerSpec implements CompilerSpec {
 	@Override
 	public PrototypeModel getCallingConvention(String name) {
 		return null;
+	}
+
+	@Override
+	public PrototypeModel[] getAllModels() {
+		return new PrototypeModel[0];
 	}
 
 	@Override
@@ -575,13 +569,18 @@ class TemporaryCompilerSpec implements CompilerSpec {
 	}
 
 	@Override
-	public Language getLanguage() {
-		return translator.getOldLanguage();
+	public DecompilerLanguage getDecompilerOutputLanguage() {
+		return DecompilerLanguage.C_LANGUAGE;
 	}
 
 	@Override
-	public PrototypeModel[] getNamedCallingConventions() {
-		return new PrototypeModel[0];
+	public PrototypeModel getPrototypeEvaluationModel(EvaluationModelType modelType) {
+		return newCompilerSpec.getPrototypeEvaluationModel(modelType);
+	}
+
+	@Override
+	public Language getLanguage() {
+		return translator.getOldLanguage();
 	}
 
 	@Override
@@ -622,16 +621,6 @@ class TemporaryCompilerSpec implements CompilerSpec {
 	@Override
 	public DataOrganization getDataOrganization() {
 		return newCompilerSpec.getDataOrganization();
-	}
-
-	@Override
-	public Object getPrototypeEvaluationModel(Program program) {
-		throw new UnsupportedOperationException(
-			"Language for upgrade use only (getPrototypeEvaluationModel)");
-	}
-
-	@Override
-	public void registerProgramOptions(Program program) {
 	}
 
 	@Override
@@ -689,10 +678,5 @@ class TemporaryCompilerSpec implements CompilerSpec {
 	@Override
 	public PcodeInjectLibrary getPcodeInjectLibrary() {
 		return newCompilerSpec.getPcodeInjectLibrary();
-	}
-
-	@Override
-	public DecompilerLanguage getDecompilerOutputLanguage(Program program) {
-		return newCompilerSpec.getDecompilerOutputLanguage(program);
 	}
 }

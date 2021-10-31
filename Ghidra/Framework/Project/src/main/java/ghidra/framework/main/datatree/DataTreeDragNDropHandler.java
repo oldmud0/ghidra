@@ -22,23 +22,21 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import docking.dnd.GenericDataFlavor;
+import docking.tool.ToolConstants;
 import docking.widgets.tree.GTreeNode;
 import docking.widgets.tree.support.GTreeDragNDropHandler;
 import ghidra.framework.main.FrontEndTool;
-import ghidra.framework.plugintool.util.ToolConstants;
 import ghidra.util.Msg;
 import ghidra.util.exception.AssertException;
 
 public class DataTreeDragNDropHandler implements GTreeDragNDropHandler {
-	private static Map<DataFlavor, DataFlavorHandler> activeProjectDropFlavorHandlerMap =
-		new HashMap<>();
-	private static Map<DataFlavor, DataFlavorHandler> inactiveProjectDropFlavorHandlerMap =
+	private static Map<DataFlavor, DataTreeFlavorHandler> activeProjectDropFlavorHandlerMap =
 		new HashMap<>();
 	public static DataFlavor localDomainFileTreeFlavor = createLocalTreeNodeFlavor();
-	public static DataFlavor localDomainFileFlavor = createLocalTreeFlavor();
 
+	public static DataFlavor localDomainFileFlavor = createLocalTreeFlavor();
 	public static DataFlavor[] allSupportedFlavors =
-		{ localDomainFileTreeFlavor, localDomainFileFlavor };
+		{ localDomainFileTreeFlavor, localDomainFileFlavor, DataFlavor.stringFlavor };
 
 	// create a data flavor that is an List of GTreeNodes
 	private static DataFlavor createLocalTreeNodeFlavor() {
@@ -79,29 +77,31 @@ public class DataTreeDragNDropHandler implements GTreeDragNDropHandler {
 	public void drop(GTreeNode destination, Transferable transferable, int dropAction) {
 		DataFlavor[] transferDataFlavors = transferable.getTransferDataFlavors();
 		for (DataFlavor dataFlavor : transferDataFlavors) {
-			DataFlavorHandler flavorHandler = getFlavorHandler(dataFlavor);
+			DataTreeFlavorHandler flavorHandler = getFlavorHandler(dataFlavor);
 			if (flavorHandler != null) {
-				try {
-					Object transferData = transferable.getTransferData(dataFlavor);
-					flavorHandler.handle(tool, tree, destination, transferData, dropAction);
-				}
-				catch (UnsupportedFlavorException e) {
-					throw new AssertException(
-						"Got unsupported flavor from using a supported flavor");
-				}
-				catch (IOException e) {
-					Msg.showError(this, null, "IO Error", "Error during drop", e);
-				}
+				handleDrop(destination, transferable, dropAction, dataFlavor, flavorHandler);
 				return;
 			}
 		}
 	}
 
-	private DataFlavorHandler getFlavorHandler(DataFlavor flavor) {
-		if (isActiveProject) {
-			return activeProjectDropFlavorHandlerMap.get(flavor);
+	private void handleDrop(GTreeNode destination, Transferable transferable, int dropAction,
+			DataFlavor dataFlavor, DataTreeFlavorHandler flavorHandler) {
+
+		try {
+			Object transferData = transferable.getTransferData(dataFlavor);
+			flavorHandler.handle(tool, tree, destination, transferData, dropAction);
 		}
-		return inactiveProjectDropFlavorHandlerMap.get(flavor);
+		catch (UnsupportedFlavorException e) {
+			throw new AssertException("Got unsupported flavor from using a supported flavor");
+		}
+		catch (IOException e) {
+			Msg.showError(this, null, "IO Error", "Error during drop", e);
+		}
+	}
+
+	private DataTreeFlavorHandler getFlavorHandler(DataFlavor flavor) {
+		return activeProjectDropFlavorHandlerMap.get(flavor);
 	}
 
 	@Override
@@ -134,13 +134,6 @@ public class DataTreeDragNDropHandler implements GTreeDragNDropHandler {
 	@Override
 	public DataFlavor[] getSupportedDataFlavors(List<GTreeNode> transferNodes) {
 		return allSupportedFlavors;
-//        Set<DataFlavor> keySet = null;
-//        if (isActiveProject) {
-//            keySet = activeProjectDropFlavorHandlerMap.keySet();
-//        } else {
-//            keySet = inactiveProjectDropFlavorHandlerMap.keySet();
-//        }
-//        return keySet.toArray(new DataFlavor[keySet.size()]);
 	}
 
 	@Override
@@ -153,12 +146,17 @@ public class DataTreeDragNDropHandler implements GTreeDragNDropHandler {
 			return removeDuplicates(transferNodes);
 		}
 		else if (flavor == localDomainFileFlavor) {
-			// filter the list of nodes to get just file nodes, and convert each node to its
-			// corresponding domainFile
-			return transferNodes.stream().//
-				filter(DomainFileNode.class::isInstance).//
-				map(node -> ((DomainFileNode) node).getDomainFile()).//
-				collect(Collectors.toList());
+			// filter for file nodes and convert each node to its corresponding domainFile
+			return transferNodes.stream()
+					.filter(DomainFileNode.class::isInstance)
+					.map(node -> ((DomainFileNode) node).getDomainFile())
+					.collect(Collectors.toList());
+		}
+		else if (flavor.equals(DataFlavor.stringFlavor)) {
+			// allow users to copy the names of nodes
+			return transferNodes.stream()
+					.map(node -> node.getName())
+					.collect(Collectors.joining("\n"));
 		}
 		throw new AssertException("Called with a flavor that we didn't say we supported");
 	}
@@ -167,10 +165,10 @@ public class DataTreeDragNDropHandler implements GTreeDragNDropHandler {
 
 		List<GTreeNode> folderNodes = getDomainFolderNodes(allNodes);
 
-		// check each file--if it has a parent in the list, then it is not needed as a separate entry
-		return allNodes.stream().//
-			filter(node -> !isChildOfFolders(folderNodes, node)).//
-			collect(Collectors.toList());
+		// if a file has a parent in the list, then it is not needed as a separate entry
+		return allNodes.stream()
+				.filter(node -> !isChildOfFolders(folderNodes, node))
+				.collect(Collectors.toList());
 	}
 
 	private List<GTreeNode> getDomainFolderNodes(List<GTreeNode> nodeList) {
@@ -196,24 +194,16 @@ public class DataTreeDragNDropHandler implements GTreeDragNDropHandler {
 		return false;
 	}
 
-	public static void addActiveDataFlavorHandler(DataFlavor flavor, DataFlavorHandler handler) {
+	public static void addActiveDataFlavorHandler(DataFlavor flavor,
+			DataTreeFlavorHandler handler) {
 		activeProjectDropFlavorHandlerMap.put(flavor, handler);
 	}
 
-	public static void addInactiveDataFlavorHandler(DataFlavor flavor, DataFlavorHandler handler) {
-		inactiveProjectDropFlavorHandlerMap.put(flavor, handler);
-	}
-
-	public static DataFlavorHandler removeActiveDataFlavorHandler(DataFlavor flavor) {
+	public static DataTreeFlavorHandler removeActiveDataFlavorHandler(DataFlavor flavor) {
 		return activeProjectDropFlavorHandlerMap.remove(flavor);
-	}
-
-	public static DataFlavorHandler removeInctiveDataFlavorHandler(DataFlavor flavor) {
-		return inactiveProjectDropFlavorHandlerMap.remove(flavor);
 	}
 
 	public void setProjectActive(boolean b) {
 		isActiveProject = b;
 	}
-
 }

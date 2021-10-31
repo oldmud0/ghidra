@@ -35,8 +35,8 @@ import ghidra.util.task.TaskMonitor;
 /**
  * Class for managing data types in a project archive
  */
-public class ProjectDataTypeManager extends DataTypeManagerDB implements
-		ProjectArchiveBasedDataTypeManager {
+public class ProjectDataTypeManager extends DataTypeManagerDB
+		implements ProjectArchiveBasedDataTypeManager {
 
 //	private static final String DT_ARCHIVE_FILENAMES = "DataTypeArchiveFilenames";
 //	private static final String FILENAME_SEPARATOR = ";";
@@ -57,9 +57,8 @@ public class ProjectDataTypeManager extends DataTypeManagerDB implements
 	 * @throws VersionException if the database does not match the expected version.
 	 * @throws IOException if a database I/O error occurs.
 	 */
-	public ProjectDataTypeManager(DBHandle handle, int openMode, ErrorHandler errHandler,
-			Lock lock, TaskMonitor monitor) throws CancelledException, VersionException,
-			IOException {
+	public ProjectDataTypeManager(DBHandle handle, int openMode, ErrorHandler errHandler, Lock lock,
+			TaskMonitor monitor) throws CancelledException, VersionException, IOException {
 		super(handle, null, openMode, errHandler, lock, monitor);
 	}
 
@@ -98,12 +97,12 @@ public class ProjectDataTypeManager extends DataTypeManagerDB implements
 
 	////////////////////
 	@Override
-	public void dataTypeChanged(DataType dt) {
-		super.dataTypeChanged(dt);
+	public void dataTypeChanged(DataType dt, boolean isAutoChange) {
+		super.dataTypeChanged(dt, isAutoChange);
 //		dataTypeArchive.getCodeManager().invalidateCache(false);
 		// TODO
 		dataTypeArchive.dataTypeChanged(getID(dt),
-			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_CHANGED, null, dt);
+			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_CHANGED, isAutoChange, null, dt);
 	}
 
 	@Override
@@ -119,14 +118,15 @@ public class ProjectDataTypeManager extends DataTypeManagerDB implements
 			DataType replacementDt) {
 		super.dataTypeReplaced(existingDtID, existingPath, replacementDt);
 		dataTypeArchive.dataTypeChanged(existingDtID,
-			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_REPLACED, existingPath, replacementDt);
+			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_REPLACED, false, existingPath,
+			replacementDt);
 	}
 
 	@Override
 	protected void dataTypeDeleted(long deletedID, DataTypePath deletedDataTypePath) {
 		super.dataTypeDeleted(deletedID, deletedDataTypePath);
 		dataTypeArchive.dataTypeChanged(deletedID,
-			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_REMOVED, deletedDataTypePath, null);
+			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_REMOVED, false, deletedDataTypePath, null);
 	}
 
 	@Override
@@ -134,14 +134,14 @@ public class ProjectDataTypeManager extends DataTypeManagerDB implements
 		super.dataTypeMoved(dt, oldPath, newPath);
 		Category category = getCategory(oldPath.getCategoryPath());
 		dataTypeArchive.dataTypeChanged(getID(dt),
-			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_MOVED, category, dt);
+			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_MOVED, false, category, dt);
 	}
 
 	@Override
 	protected void dataTypeNameChanged(DataType dt, String oldName) {
 		super.dataTypeNameChanged(dt, oldName);
 		dataTypeArchive.dataTypeChanged(getID(dt),
-			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_RENAMED, oldName, dt);
+			DataTypeArchiveChangeManager.DOCR_DATA_TYPE_RENAMED, false, oldName, dt);
 	}
 
 	@Override
@@ -197,9 +197,6 @@ public class ProjectDataTypeManager extends DataTypeManagerDB implements
 		// TODO
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataTypeManager#startTransaction(java.lang.String)
-	 */
 	@Override
 	public int startTransaction(String description) {
 		return dataTypeArchive.startTransaction(description);
@@ -210,26 +207,11 @@ public class ProjectDataTypeManager extends DataTypeManagerDB implements
 		dataTypeArchive.flushEvents();
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataTypeManager#endTransaction(int, boolean)
-	 */
 	@Override
 	public void endTransaction(int transactionID, boolean commit) {
 		dataTypeArchive.endTransaction(transactionID, commit);
-
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataTypeManager#close()
-	 */
-	@Override
-	public void close() {
-		// do nothing
-	}
-
-	/* (non-Javadoc)
-	 * @see ghidra.program.model.data.DomainFileBasedDataTypeManager#getDomainFile()
-	 */
 	@Override
 	public DomainFile getDomainFile() {
 		return dataTypeArchive.getDomainFile();
@@ -252,20 +234,16 @@ public class ProjectDataTypeManager extends DataTypeManagerDB implements
 		return ArchiveType.PROJECT;
 	}
 
-	@Override
-	public DataOrganization getDataOrganization() {
-		if (dataOrganization == null) {
-			dataOrganization = DataOrganizationImpl.getDefaultOrganization();
-		}
-		return dataOrganization;
-//		// For now project data type archive will use the default data organization.
-//		return DataOrganization.getDefaultOrganization();
-	}
-
 	public void archiveReady(int openMode, TaskMonitor monitor) throws CancelledException {
 		if (openMode == DBConstants.UPGRADE) {
 			doSourceArchiveUpdates(null, monitor);
 		}
+	}
+
+	@Override
+	public void close() {
+		// do nothing - cannot close a project data type manager
+		// dispose should be invoked by the owner of the instance
 	}
 
 }

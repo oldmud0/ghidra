@@ -59,6 +59,7 @@ import ghidra.util.exception.DuplicateNameException;
  *         BYTE    Selection;                      // communal selection type
  *     } Section;
  * } IMAGE_AUX_SYMBOL;
+ * </pre>
  */
 public class DebugCOFFSymbolAux implements StructConverter {
     public final static byte IMAGE_SIZEOF_AUX_SYMBOL = 18;
@@ -142,7 +143,7 @@ public class DebugCOFFSymbolAux implements StructConverter {
     	return structure;
     }
 
-    private static class AuxSym implements StructConverter {
+	public static class AuxSym implements StructConverter {
         private int      tagIndex;
         private short    miscLnSzLinenumber;
         private short    miscLnSzSize;
@@ -208,7 +209,7 @@ public class DebugCOFFSymbolAux implements StructConverter {
         }
     }
 
-    private static class AuxFile implements StructConverter {
+	public static class AuxFile implements StructConverter {
         private String name;
 
         private static AuxFile createAuxFile(FactoryBundledWithBinaryReader reader, int index) throws IOException {
@@ -239,7 +240,7 @@ public class DebugCOFFSymbolAux implements StructConverter {
         }
     }
 
-    private static class AuxSection implements StructConverter {
+	public static class AuxSection implements StructConverter {
         private int   length;
         private short numberOfRelocations;
         private short numberOfLinenumbers;

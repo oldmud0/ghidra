@@ -443,7 +443,7 @@ class SymbolMerger extends AbstractListingMerger {
 			Symbol sym = symTab.getSymbol(id);
 			if (sym != null && sym.isPrimary()) {
 				SymbolType symType = sym.getSymbolType();
-				if (((symType == SymbolType.CODE) || (symType == SymbolType.FUNCTION)) &&
+				if (((symType == SymbolType.LABEL) || (symType == SymbolType.FUNCTION)) &&
 					!sym.isExternal()) {
 					primaryAdds.add(id);
 					Address addr = sym.getAddress();
@@ -796,7 +796,7 @@ class SymbolMerger extends AbstractListingMerger {
 			SymbolType originalType = originalSym.getSymbolType();
 			// CODE, CLASS, EXTERNAL, FUNCTION, GLOBAL, GLOBAL_VAR, LIBRARY,
 			// LOCAL_VAR, NAMESPACE, PARAMETER
-			if ((originalType == SymbolType.CODE && !originalSym.isExternal()) ||
+			if ((originalType == SymbolType.LABEL && !originalSym.isExternal()) ||
 				(originalType == SymbolType.CLASS) || (originalType == SymbolType.NAMESPACE)) {
 				processSingleRemove(id, originalSym);
 			}
@@ -849,12 +849,12 @@ class SymbolMerger extends AbstractListingMerger {
 				}
 				continue;
 			}
-			else if ((myType != SymbolType.CODE) && (myType != SymbolType.CLASS) &&
+			else if ((myType != SymbolType.LABEL) && (myType != SymbolType.CLASS) &&
 				(myType != SymbolType.NAMESPACE)) {
 				continue;
 			}
 			// Skip external labels since they should have already been handled by ExternalFunctionMerger.
-			if (myType == SymbolType.CODE && mySym.isExternal()) {
+			if (myType == SymbolType.LABEL && mySym.isExternal()) {
 				continue;
 			}
 
@@ -934,9 +934,21 @@ class SymbolMerger extends AbstractListingMerger {
 		monitor.setProgress(len);
 	}
 
+	private static boolean isDefaultThunk(Symbol s) {
+		if (s.getSource() != SourceType.DEFAULT || s.getSymbolType() != SymbolType.FUNCTION) {
+			return false;
+		}
+		Function f = (Function) s.getObject();
+		return f.isThunk();
+	}
+
 	private void processModifiedFunctionNamespace(long id, Symbol mySym, Symbol resultSym) {
-		Namespace myNs = mySym.getParentNamespace();
-		Namespace resultNs = resultSym.getParentNamespace();
+		Namespace myNs = // default thunks may lie about their namespace
+			isDefaultThunk(mySym) ? mySym.getProgram().getGlobalNamespace()
+					: mySym.getParentNamespace();
+		Namespace resultNs = // default thunks may lie about their namespace
+			isDefaultThunk(resultSym) ? resultSym.getProgram().getGlobalNamespace()
+					: resultSym.getParentNamespace();
 		try {
 			Namespace desiredNs = resolveNamespace(myPgm, myNs);
 			// Is the result namespace the one we actually want it to be?
@@ -1100,7 +1112,7 @@ class SymbolMerger extends AbstractListingMerger {
 				// Try to add
 				processAddedFunctionSymbol(mySym);
 			}
-			else if ((myType != SymbolType.CODE) && (myType != SymbolType.CLASS) &&
+			else if ((myType != SymbolType.LABEL) && (myType != SymbolType.CLASS) &&
 				(myType != SymbolType.NAMESPACE)) {
 				continue;
 			}
@@ -1108,7 +1120,7 @@ class SymbolMerger extends AbstractListingMerger {
 			try {
 				// Try to add
 				SymbolType mySymbolType = mySym.getSymbolType();
-				if (mySym.isExternal() && mySymbolType == SymbolType.CODE) {
+				if (mySym.isExternal() && mySymbolType == SymbolType.LABEL) {
 					continue; // External should have already been handled in ExternalMerger.
 				}
 				addSymbol(mySym);
@@ -2436,7 +2448,7 @@ class SymbolMerger extends AbstractListingMerger {
 			throws DuplicateNameException, InvalidInputException {
 //		String comment = srcSymbol.getSymbolData3();
 		Symbol symbol = null;
-		if (type == SymbolType.CODE) {
+		if (type == SymbolType.LABEL) {
 			symbol = resultSymTab.createLabel(resultAddr, name, resultParentNs, source);
 		}
 		else if (type == SymbolType.CLASS) {
@@ -2491,7 +2503,7 @@ class SymbolMerger extends AbstractListingMerger {
 		SymbolType symType = originalSymbol.getSymbolType();
 		String symbolName = originalSymbol.getName();
 		SourceType source = originalSymbol.getSource();
-		if (symType == SymbolType.CODE) {
+		if (symType == SymbolType.LABEL) {
 			if (originalSymbol.isExternal()) {
 				ExternalManager resultExternalManager = resultPgm.getExternalManager();
 				ExternalLocation resultExtLocation =

@@ -29,6 +29,7 @@ import org.junit.Test;
 import docking.widgets.dialogs.NumberInputDialog;
 import ghidra.program.model.data.*;
 import ghidra.util.exception.DuplicateNameException;
+import ghidra.util.exception.UsrException;
 
 public class StructureEditorUnlockedActions5Test
 		extends AbstractStructureEditorUnlockedActionsTest {
@@ -49,8 +50,14 @@ public class StructureEditorUnlockedActions5Test
 	@Test
 	public void testApplyNameChange() throws Exception {
 		init(complexStructure, pgmTestCat);
-
-		model.setName("FooBarStructure");
+		runSwing(() -> {
+			try {
+				model.setName("FooBarStructure");
+			}
+			catch (UsrException e) {
+				failWithException("Unexpected error", e);
+			}
+		});
 		DataType viewCopy = model.viewComposite.clone(null);
 
 		assertEquals("FooBarStructure", model.getCompositeName());
@@ -80,6 +87,7 @@ public class StructureEditorUnlockedActions5Test
 		invoke(applyAction);
 		assertTrue(simpleStructure.isEquivalent(model.viewComposite));
 		assertTrue(simpleStructure.isNotYetDefined());
+		assertTrue(simpleStructure.isZeroLength());
 		assertTrue(viewCopy.isEquivalent(model.viewComposite));
 		// Is now allowed
 		//		assertEquals(
@@ -125,7 +133,7 @@ public class StructureEditorUnlockedActions5Test
 		assertTrue(dt2 instanceof WordDataType);
 
 		// Cancel the array dialog
-		invoke(arrayAction);
+		invoke(arrayAction, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		cancelInput(dialog);
@@ -156,7 +164,7 @@ public class StructureEditorUnlockedActions5Test
 		assertEquals(getDataType(3), DataType.DEFAULT);
 		assertEquals(getDataType(4), dt3);
 
-		invoke(action);
+		invoke(action, false);
 		dialog = waitForDialogComponent(NumberInputDialog.class);
 		assertNotNull(dialog);
 		cancelInput(dialog);

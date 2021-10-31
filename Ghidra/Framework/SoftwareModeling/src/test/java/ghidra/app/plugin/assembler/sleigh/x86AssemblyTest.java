@@ -15,6 +15,9 @@
  */
 package ghidra.app.plugin.assembler.sleigh;
 
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
+
 import org.junit.Test;
 
 import ghidra.app.plugin.assembler.*;
@@ -29,6 +32,20 @@ public class x86AssemblyTest extends AbstractAssemblyTest {
 	@Override
 	protected LanguageID getLanguageID() {
 		return new LanguageID("x86:LE:64:default");
+	}
+
+	@Test
+	public void testReasonableErrorMessageLength() throws AssemblySemanticException {
+		Assembler assembler = Assemblers.getAssembler(lang);
+		Address addr = lang.getDefaultSpace().getAddress(DEFAULT_ADDR);
+		try {
+			assembler.assembleLine(addr, "UNLIKELY qword ptr [RAX],RBX");
+			fail(); // The exception must be thrown
+		}
+		catch (AssemblySyntaxException e) {
+			Msg.info(this, "Got expected syntax error: " + e);
+			assertTrue(e.getMessage().length() < 1000);
+		}
 	}
 
 	@Test
@@ -250,7 +267,7 @@ public class x86AssemblyTest extends AbstractAssemblyTest {
 
 	@Test
 	public void testAssembly_AND_mRBP_n0x8m_0xffff0000() {
-		assertOneCompatRestExact("AND qword ptr [RBP + -0x8],0xffff0000",
+		assertOneCompatRestExact("AND qword ptr [RBP + -0x8],-0x10000",
 			"48:81:65:f8:00:00:ff:ff");
 	}
 

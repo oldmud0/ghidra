@@ -16,6 +16,7 @@
 package ghidra.app.plugin.assembler.sleigh.sem;
 
 import java.math.BigInteger;
+import java.util.List;
 
 import ghidra.app.plugin.assembler.sleigh.util.DbgTimer;
 import ghidra.app.plugin.processors.sleigh.SleighLanguage;
@@ -56,7 +57,7 @@ public class AssemblyDefaultContext implements DisassemblerContext, DefaultProgr
 		this.lang = lang;
 		this.at = at;
 		Register ctxreg = lang.getContextBaseRegister();
-		if (null == ctxreg) {
+		if (ctxreg == Register.NO_CONTEXT) {
 			this.defctx = AssemblyPatternBlock.nop();
 			this.curctx = AssemblyPatternBlock.nop();
 		}
@@ -117,7 +118,7 @@ public class AssemblyDefaultContext implements DisassemblerContext, DefaultProgr
 	}
 
 	@Override
-	public Register[] getRegisters() {
+	public List<Register> getRegisters() {
 		return lang.getRegisters();
 	}
 

@@ -22,15 +22,19 @@ import java.beans.PropertyChangeListener;
 import java.math.BigInteger;
 import java.util.*;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import javax.swing.*;
 import javax.swing.border.Border;
 
+import docking.widgets.checkbox.GCheckBox;
+import docking.widgets.combobox.GComboBox;
 import docking.widgets.fieldpanel.*;
 import docking.widgets.fieldpanel.field.*;
 import docking.widgets.fieldpanel.listener.LayoutModelListener;
 import docking.widgets.fieldpanel.support.*;
 import docking.widgets.indexedscrollpane.IndexedScrollPane;
+import docking.widgets.label.GDLabel;
 import ghidra.GhidraOptions;
 import ghidra.util.SystemUtilities;
 
@@ -51,7 +55,8 @@ public class OptionsGui extends JPanel {
 	private static final Color DARK_ORANGE = new Color(255, 128, 0);
 	private static final Color DARK_RED = new Color(130, 0, 75);
 	private static final Highlight[] NO_HIGHLIGHTS = new Highlight[0];
-	private static final HighlightFactory hlFactory = (text, cursorTextOffset) -> NO_HIGHLIGHTS;
+	private static final HighlightFactory hlFactory =
+		(field, text, cursorTextOffset) -> NO_HIGHLIGHTS;
 
 	public static final ScreenElement COMMENT_AUTO =
 		new ScreenElement("Comment, Automatic", Color.LIGHT_GRAY);
@@ -126,9 +131,6 @@ public class OptionsGui extends JPanel {
 		MNEMONIC_OVERRIDE, PARAMETER_CUSTOM, PARAMETER_DYNAMIC, REGISTERS, SEPARATOR, UNDERLINE,
 		VARIABLE, VERSION_TRAK, XREF, XREF_OFFCUT, XREF_READ, XREF_WRITE, XREF_OTHER };
 
-	private String[] fontSizes = { "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
-		"17", "18", "20", "22", "24", "30" };
-
 	private Map<Integer, FontMetrics> metricsMap = new HashMap<>();
 
 	private JList<ScreenElement> namesList;
@@ -138,7 +140,7 @@ public class OptionsGui extends JPanel {
 	private JCheckBox boldCheckbox;
 	private JCheckBox italicsCheckbox;
 	private JCheckBox customCheckbox;
-	private JComboBox<String> fontSizeField;
+	private JComboBox<Integer> fontSizeField;
 	private JComboBox<String> fontNameField;
 	private JPanel colorPanel;
 	private int selectedIndex;
@@ -170,7 +172,7 @@ public class OptionsGui extends JPanel {
 		});
 
 		setSelectedFontName(baseFont.getName());
-		fontSizeField.setSelectedItem(Integer.toString(baseFont.getSize()));
+		fontSizeField.setSelectedItem(baseFont.getSize());
 
 		namesList.setSelectedIndex(0);
 		namesList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -337,20 +339,20 @@ public class OptionsGui extends JPanel {
 
 		GraphicsEnvironment gEnv = GraphicsEnvironment.getLocalGraphicsEnvironment();
 		String envfonts[] = gEnv.getAvailableFontFamilyNames();
-		fontNameField = new JComboBox<>(envfonts);
+		fontNameField = new GComboBox<>(envfonts);
 		fontNameField.setBackground(Color.white);
 		fontNameField.setRenderer(new FontRenderer());
 		panel1.add(fontNameField);
 
-		fontSizeField = new JComboBox<>(fontSizes);
+		fontSizeField = new GComboBox<>(IntStream.rangeClosed(6, 32).boxed().toArray(Integer[]::new));
 		fontSizeField.setBackground(Color.white);
 		panel1.add(fontSizeField);
 		panel.add(panel1, BorderLayout.NORTH);
 
 		JPanel panel2 = new JPanel(new FlowLayout());
 		JPanel subPanel = new JPanel(new GridLayout(1, 2, 2, 4));
-		globalBoldCheckbox = new JCheckBox("Bold");
-		globalItalicsCheckbox = new JCheckBox("Italics");
+		globalBoldCheckbox = new GCheckBox("Bold");
+		globalItalicsCheckbox = new GCheckBox("Italics");
 		subPanel.add(globalBoldCheckbox);
 		subPanel.add(globalItalicsCheckbox);
 		panel2.add(subPanel);
@@ -360,7 +362,7 @@ public class OptionsGui extends JPanel {
 	}
 
 	//Displays the font field with the actual fonts for easier selection
-	class FontRenderer extends JLabel implements ListCellRenderer<String> {
+	class FontRenderer extends GDLabel implements ListCellRenderer<String> {
 		private static final long serialVersionUID = 1L;
 		private final Color SELECTED_COLOR = new Color(10, 36, 106);
 
@@ -371,7 +373,7 @@ public class OptionsGui extends JPanel {
 		@Override
 		public Component getListCellRendererComponent(JList<? extends String> list, String value,
 				int index, boolean isSelected, boolean cellHasFocus) {
-			setText(value.toString());
+			setText(value);
 			Font origFont = fontNameField.getFont();
 			setFont(new Font(value.toString(), origFont.getStyle(), origFont.getSize()));
 
@@ -393,9 +395,9 @@ public class OptionsGui extends JPanel {
 
 		JPanel subPanel = new JPanel(new GridLayout(1, 3, 2, 4));
 		subPanel.setBorder(BorderFactory.createTitledBorder(border, "Style Settings"));
-		boldCheckbox = new JCheckBox("Bold");
-		italicsCheckbox = new JCheckBox("Italics");
-		customCheckbox = new JCheckBox("Custom");
+		boldCheckbox = new GCheckBox("Bold");
+		italicsCheckbox = new GCheckBox("Italics");
+		customCheckbox = new GCheckBox("Custom");
 		subPanel.add(customCheckbox);
 		subPanel.add(boldCheckbox);
 		subPanel.add(italicsCheckbox);
@@ -770,7 +772,7 @@ public class OptionsGui extends JPanel {
 		String name = (String) fontNameField.getSelectedItem();
 		int size = baseFont.getSize();
 		try {
-			size = Integer.parseInt((String) fontSizeField.getSelectedItem());
+			size = (Integer) fontSizeField.getSelectedItem();
 		}
 		catch (Exception e) {
 		}

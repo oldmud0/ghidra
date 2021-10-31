@@ -19,6 +19,7 @@ import java.awt.Component;
 import java.awt.datatransfer.DataFlavor;
 import java.awt.dnd.DropTargetDropEvent;
 import java.io.File;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
@@ -27,7 +28,6 @@ import java.util.function.Function;
 import docking.widgets.tree.GTreeNode;
 import ghidra.app.services.FileImporterService;
 import ghidra.app.util.FileOpenDataFlavorHandler;
-import ghidra.framework.main.FrontEndTool;
 import ghidra.framework.model.DomainFolder;
 import ghidra.framework.plugintool.PluginTool;
 import ghidra.framework.plugintool.ServiceProvider;
@@ -38,11 +38,11 @@ import ghidra.util.Msg;
  * duty in that it opens files for DataTrees and for Tools (signaled via the interfaces it
  * implements).
  */
-public final class LinuxFileUrlHandler implements DataFlavorHandler, FileOpenDataFlavorHandler {
+public final class LinuxFileUrlHandler implements DataTreeFlavorHandler, FileOpenDataFlavorHandler {
 
 	@Override
 	// This is for the DataFlavorHandler interface for handling node drops in DataTrees
-	public void handle(FrontEndTool tool, DataTree dataTree, GTreeNode destinationNode,
+	public void handle(PluginTool tool, DataTree dataTree, GTreeNode destinationNode,
 			Object transferData, int dropAction) {
 
 		DomainFolder folder = getDomainFolder(destinationNode);
@@ -85,8 +85,14 @@ public final class LinuxFileUrlHandler implements DataFlavorHandler, FileOpenDat
 			try {
 				return new File(new URL(s).toURI());
 			}
-			catch (Exception ex) {
-				Msg.error(this, "Unable to open dropped URL: '" + s + "'", ex);
+			catch (MalformedURLException e) {
+				// this could be the case that this handler is attempting to process an arbitrary
+				// String that is not actually a URL
+				Msg.trace(this, "Not a URL: '" + s + "'", e);
+				return null;
+			}
+			catch (Exception e) {
+				Msg.error(this, "Unable to open dropped URL: '" + s + "'", e);
 				return null;
 			}
 		});

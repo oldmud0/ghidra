@@ -16,14 +16,10 @@
 package ghidra.app.util.pcodeInject;
 
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.Set;
-
-import org.jdom.JDOMException;
+import java.util.HashMap;
+import java.util.Map;
 
 import ghidra.app.plugin.processors.sleigh.SleighLanguage;
-import ghidra.app.plugin.processors.sleigh.template.OpTpl;
-import ghidra.pcodeCPort.slgh_compile.PcodeParser;
 import ghidra.program.model.lang.*;
 import ghidra.program.model.listing.Program;
 
@@ -79,18 +75,7 @@ import ghidra.program.model.listing.Program;
  *   (Use/add to PcodeTextEmitter.java to actually emit pcode text)
  * See ConstantPoolJava.java for examples of the use of the CPOOL pcode op.
  * 
- * TODO:
- *   1) For the lookupswitch op, the disassembly is correct but the decompilation is not.
- *      There are several possible ways of modeling the instruction in pcode - either using
- *      injection (SwitchMethods.java) or pcode (JVM.slaspec).  In all cases, there seems to
- *      be an issue with getting the decompiler to follow pointers to the various switch clauses.
- *      The file LookupSwitchHex.java in the resource directory contains a class file with 
- *      4 methods with switch statements.  Currently the first method is modeled using a
- *      pcode loop and the last three are modeled using pcode injection (which is possible because
- *      there are actually 4 separate lookupswitch instructions, the only difference is the amount 
- *      of padding bytes).
- * 
- * possible improvements:
+  * possible improvements:
  *
  *   2) incorporate exceptions.
  *   6) decide how to display the information used in an invokedynamic instruction
@@ -121,130 +106,70 @@ public class PcodeInjectLibraryJava extends PcodeInjectLibrary {
 	public static final String LDC = "ldcCallOther";
 	public static final String LDC2_W = "ldc2_wCallOther";
 	public static final String LDC_W = "ldc_wCallOther";
-	public static final String LOOKUP_SWITCH = "lookupswitchCallOther";
 	public static final String MULTIANEWARRAY = "multianewarrayCallOther";
 
 	public static final String PUTFIELD = "putFieldCallOther";
 	public static final String PUTSTATIC = "putStaticCallOther";
+	public static final String SOURCENAME = "javainternal";
 
 	//size of one stack element in the jvm (in bytes)
 	public static final int REFERENCE_SIZE = 4;
 
-	private SleighLanguage language;
-	private Set<String> implementedOps;
-	private PcodeParser parser;
-	private InjectPayloadJavaParameters paramPayload;
+	private Map<String, InjectPayloadJava> implementedOps;
 
 	public PcodeInjectLibraryJava(SleighLanguage l) {
 		super(l);
-		language = l;
-		implementedOps = new HashSet<>();
-		implementedOps.add(GETFIELD);
-		implementedOps.add(GETSTATIC);
-		implementedOps.add(INVOKE_DYNAMIC);
-		implementedOps.add(INVOKE_INTERFACE);
-		implementedOps.add(INVOKE_SPECIAL);
-		implementedOps.add(INVOKE_STATIC);
-		implementedOps.add(INVOKE_VIRTUAL);
-		implementedOps.add(LDC);
-		implementedOps.add(LDC2_W);
-		implementedOps.add(LDC_W);
-		implementedOps.add(LOOKUP_SWITCH);
-		implementedOps.add(MULTIANEWARRAY);
-		implementedOps.add(PUTFIELD);
-		implementedOps.add(PUTSTATIC);
+		implementedOps = new HashMap<>();
+		implementedOps.put(GETFIELD, new InjectGetField(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(GETSTATIC, new InjectGetStatic(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(INVOKE_DYNAMIC, new InjectInvokeDynamic(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(INVOKE_INTERFACE, new InjectInvokeInterface(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(INVOKE_SPECIAL, new InjectInvokeSpecial(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(INVOKE_STATIC, new InjectInvokeStatic(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(INVOKE_VIRTUAL, new InjectInvokeVirtual(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(LDC, new InjectLdc(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(LDC2_W, new InjectLdc(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(LDC_W, new InjectLdc(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(MULTIANEWARRAY, new InjectMultiANewArray(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(PUTFIELD, new InjectPutField(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+		implementedOps.put(PUTSTATIC, new InjectPutStatic(SOURCENAME, l, uniqueBase));
+		uniqueBase += 0x100;
+	}
 
-		String translateSpec = language.buildTranslatorTag(language.getAddressFactory(),
-			getUniqueBase(), language.getSymbolTable());
-
-		paramPayload = null;
-		parser = null;
-		try {
-			parser = new PcodeParser(translateSpec);
-		}
-		catch (JDOMException e1) {
-			e1.printStackTrace();
-		}
+	public PcodeInjectLibraryJava(PcodeInjectLibraryJava op2) {
+		super(op2);
+		implementedOps = op2.implementedOps;	// Immutable
 	}
 
 	@Override
-	protected InjectPayloadSleigh allocateInject(String sourceName, String name, int tp) {
-		InjectPayloadJava payload = null;
-		if (tp != InjectPayload.CALLOTHERFIXUP_TYPE)
-			return super.allocateInject(sourceName, name, tp);
-		switch (name) {
-			case GETFIELD:
-				payload = new InjectGetField(sourceName, language);
-				break;
-			case GETSTATIC:
-				payload = new InjectGetStatic(sourceName, language);
-				break;
-			case INVOKE_DYNAMIC:
-				payload = new InjectInvokeDynamic(sourceName, language);
-				break;
-			case INVOKE_INTERFACE:
-				payload = new InjectInvokeInterface(sourceName, language);
-				break;
-			case INVOKE_SPECIAL:
-				payload = new InjectInvokeSpecial(sourceName, language);
-				break;
-			case INVOKE_STATIC:
-				payload = new InjectInvokeStatic(sourceName, language);
-				break;
-			case INVOKE_VIRTUAL:
-				payload = new InjectInvokeVirtual(sourceName, language);
-				break;
-			case LDC:
-			case LDC2_W:
-			case LDC_W:
-				payload = new InjectLdc(sourceName, language);
-				break;
-			case LOOKUP_SWITCH:
-				payload = new InjectLookupSwitch(sourceName, language);
-				break;
-			case MULTIANEWARRAY:
-				payload = new InjectMultiANewArray(sourceName, language);
-				break;
-			case PUTFIELD:
-				payload = new InjectPutField(sourceName, language);
-				break;
-			case PUTSTATIC:
-				payload = new InjectPutStatic(sourceName, language);
-				break;
-			default:
-				return super.allocateInject(sourceName, name, InjectPayload.CALLOTHERFIXUP_TYPE);
-		}
-		return payload;
+	public PcodeInjectLibrary clone() {
+		return new PcodeInjectLibraryJava(this);
 	}
 
 	@Override
-	/**
-	* This method is called by DecompileCallback.getPcodeInject.
-	*/
-	public InjectPayload getPayload(int type, String name, Program program, String context) {
-		if (type == InjectPayload.CALLMECHANISM_TYPE) {
-			if (paramPayload == null) {
-				paramPayload = new InjectPayloadJavaParameters();
+	public InjectPayload allocateInject(String sourceName, String name, int tp) {
+		if (tp == InjectPayload.CALLMECHANISM_TYPE) {
+			return new InjectPayloadJavaParameters(name, sourceName, language, tp);
+		}
+		if (tp == InjectPayload.CALLOTHERFIXUP_TYPE) {
+			InjectPayloadJava payload = implementedOps.get(name);
+			if (payload != null) {
+				return payload;
 			}
-			return paramPayload;
 		}
-
-		if (!implementedOps.contains(name)) {
-			return super.getPayload(type, name, program, context);
-		}
-
-		InjectPayloadJava payload =
-			(InjectPayloadJava) super.getPayload(InjectPayload.CALLOTHERFIXUP_TYPE, name, program,
-				context);
-
-		synchronized (parser) {
-			OpTpl[] opTemplates = payload.getPcode(parser, program, context);
-			adjustUniqueBase(opTemplates);
-			//clear the added symbols so that the parser can be used again without
-			//duplicate symbol name conflicts.
-			parser.clearSymbols();
-		}
-		return payload;
+		return super.allocateInject(sourceName, name, tp);
 	}
 
 	@Override

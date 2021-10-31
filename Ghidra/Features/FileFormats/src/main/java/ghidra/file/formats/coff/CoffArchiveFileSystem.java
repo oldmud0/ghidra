@@ -20,7 +20,7 @@ import java.io.InputStream;
 import java.util.*;
 
 import ghidra.app.util.bin.ByteProvider;
-import ghidra.app.util.bin.ByteProviderInputStream;
+import ghidra.app.util.bin.ByteProviderWrapper;
 import ghidra.app.util.bin.format.coff.CoffException;
 import ghidra.app.util.bin.format.coff.archive.CoffArchiveHeader;
 import ghidra.app.util.bin.format.coff.archive.CoffArchiveMemberHeader;
@@ -77,9 +77,15 @@ public class CoffArchiveFileSystem implements GFileSystem {
 	public InputStream getInputStream(GFile file, TaskMonitor monitor)
 			throws IOException, CancelledException {
 
+		ByteProvider bp = getByteProvider(file, monitor);
+		return bp != null ? bp.getInputStream(0) : null;
+	}
+
+	public ByteProvider getByteProvider(GFile file, TaskMonitor monitor) {
 		CoffArchiveMemberHeader entry = fsih.getMetadata(file);
 		return (entry != null && entry.isCOFF())
-				? new ByteProviderInputStream(provider, entry.getPayloadOffset(), entry.getSize())
+				? new ByteProviderWrapper(provider, entry.getPayloadOffset(), entry.getSize(),
+					file.getFSRL())
 				: null;
 	}
 
@@ -104,7 +110,7 @@ public class CoffArchiveFileSystem implements GFileSystem {
 	}
 
 	@Override
-	public String getInfo(GFile file, TaskMonitor monitor) throws IOException {
+	public String getInfo(GFile file, TaskMonitor monitor) {
 		CoffArchiveMemberHeader entry = fsih.getMetadata(file);
 		return (entry == null) ? null : FSUtilities.infoMapToString(getInfoMap(entry));
 	}

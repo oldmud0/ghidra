@@ -25,6 +25,7 @@ import javax.swing.JComponent;
 
 import docking.*;
 import docking.action.*;
+import docking.tool.ToolConstants;
 import docking.widgets.fieldpanel.support.Highlight;
 import docking.widgets.table.threaded.*;
 import ghidra.GhidraOptions;
@@ -44,7 +45,6 @@ import ghidra.framework.model.DomainObject;
 import ghidra.framework.options.*;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
-import ghidra.framework.plugintool.util.ToolConstants;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.CodeUnit;
 import ghidra.program.model.listing.Program;
@@ -350,7 +350,7 @@ public class MemSearchPlugin extends Plugin implements OptionsChangeListener,
 			}
 
 			@Override
-			protected boolean isValidContext(NavigatableActionContext context) {
+			protected boolean isEnabledForContext(NavigatableActionContext context) {
 				return !(context instanceof RestrictedAddressSetContext);
 			}
 		};
@@ -359,6 +359,7 @@ public class MemSearchPlugin extends Plugin implements OptionsChangeListener,
 		searchAction.setMenuBarData(new MenuData(menuPath, "search"));
 		searchAction.setKeyBindingData(new KeyBindingData('S', 0));
 		searchAction.setDescription("Search Memory for byte sequence");
+		searchAction.addToWindowWhen(NavigatableActionContext.class);
 		tool.addAction(searchAction);
 
 		searchAgainAction = new NavigatableContextAction("Repeat Memory Search", getName()) {
@@ -369,21 +370,17 @@ public class MemSearchPlugin extends Plugin implements OptionsChangeListener,
 			}
 
 			@Override
-			public boolean isEnabledForContext(NavigatableActionContext context) {
-				return searchInfo != null;
-			}
-
-			@Override
-			protected boolean isValidContext(NavigatableActionContext context) {
-				return !(context instanceof RestrictedAddressSetContext);
+			protected boolean isEnabledForContext(NavigatableActionContext context) {
+				return !(context instanceof RestrictedAddressSetContext) && searchInfo != null;
 			}
 		};
-		searchAgainAction.setHelpLocation(
-			new HelpLocation(HelpTopics.SEARCH, searchAgainAction.getName()));
+		searchAgainAction
+				.setHelpLocation(new HelpLocation(HelpTopics.SEARCH, searchAgainAction.getName()));
 		menuPath = new String[] { "&Search", "Repeat Memory Search" };
 		searchAgainAction.setMenuBarData(new MenuData(menuPath, "search"));
 		searchAgainAction.setKeyBindingData(new KeyBindingData(KeyEvent.VK_F3, 0));
 		searchAgainAction.setDescription("Search Memory for byte sequence");
+		searchAgainAction.addToWindowWhen(NavigatableActionContext.class);
 		tool.addAction(searchAgainAction);
 	}
 
@@ -401,9 +398,10 @@ public class MemSearchPlugin extends Plugin implements OptionsChangeListener,
 			"Toggles highlight search results");
 
 		opt.registerOption(PluginConstants.SEARCH_HIGHLIGHT_COLOR_NAME,
-			PluginConstants.SEARCH_HIGHLIGHT_COLOR, null, null);
+			PluginConstants.SEARCH_HIGHLIGHT_COLOR, null, "The search result highlight color");
 		opt.registerOption(PluginConstants.SEARCH_HIGHLIGHT_CURRENT_COLOR_NAME,
-			PluginConstants.SEARCH_HIGHLIGHT_CURRENT_ADDR_COLOR, null, null);
+			PluginConstants.SEARCH_HIGHLIGHT_CURRENT_ADDR_COLOR, null,
+			"The search result highlight color for the currently selected match");
 
 		opt.addOptionsChangeListener(this);
 
@@ -754,14 +752,19 @@ public class MemSearchPlugin extends Plugin implements OptionsChangeListener,
 
 		private Color getHighlightColor(Address highlightStart, int highlightLength) {
 			ProgramLocation location = navigatable != null ? navigatable.getLocation() : null;
-			if (location instanceof BytesFieldLocation) {
-				BytesFieldLocation byteLoc = (BytesFieldLocation) location;
-				Address byteAddress = byteLoc.getAddressForByte();
+			if (!(location instanceof BytesFieldLocation)) {
+				return defaultHighlightColor;
+			}
+
+			BytesFieldLocation byteLoc = (BytesFieldLocation) location;
+			Address byteAddress = byteLoc.getAddressForByte();
+			if (highlightStart.hasSameAddressSpace(byteAddress)) {
 				long diff = byteAddress.subtract(highlightStart);
 				if (diff >= 0 && diff < highlightLength) {
-					return activeHighlightColor;
+					return activeHighlightColor; // the current location is in the highlight
 				}
 			}
+
 			return defaultHighlightColor;
 		}
 

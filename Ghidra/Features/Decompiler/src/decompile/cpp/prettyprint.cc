@@ -259,8 +259,9 @@ void EmitXml::tagField(const char *ptr,syntax_highlight hl,const Datatype *ct,in
 void EmitXml::tagComment(const char *ptr,syntax_highlight hl,
 			   const AddrSpace *spc,uintb off) {
   *s << "<comment " << highlight[(int4)hl];
-  *s << " space=\"" << spc->getName();
-  *s << "\" off=\"0x" << hex << off << "\">";
+  a_v(*s,"space",spc->getName());
+  a_v_u(*s,"off",off);
+  *s << '>';
   xml_escape(*s,ptr);
   *s << "</comment>";
 }
@@ -276,8 +277,9 @@ void EmitXml::tagComment(const char *ptr,syntax_highlight hl,
 void EmitXml::tagLabel(const char *ptr,syntax_highlight hl,
 			 const AddrSpace *spc,uintb off) {
   *s << "<label " << highlight[(int4)hl];
-  *s << " space=\"" << spc->getName();
-  *s << "\" off=\"0x" << hex << off << "\">";
+  a_v(*s,"space",spc->getName());
+  a_v_u(*s,"off",off);
+  *s << '>';
   xml_escape(*s,ptr);
   *s << "</label>";
 }
@@ -342,6 +344,12 @@ void EmitXml::spaces(int4 num,int4 bump)
       spc += ' ';
     print(spc.c_str());
   }
+}
+
+void EmitXml::resetDefaults(void)
+
+{
+  resetDefaultsInternal();
 }
 
 int4 TokenSplit::countbase = 0;
@@ -536,15 +544,15 @@ void TokenSplit::printDebug(ostream &s) const
 }
 #endif
 
-EmitPrettyPrint::EmitPrettyPrint(int4 mls) 
-  : EmitXml(), scanqueue( 3*mls ), tokqueue( 3*mls )
+EmitPrettyPrint::EmitPrettyPrint(void)
+  : EmitXml(), scanqueue( 3*100 ), tokqueue( 3*100 )
 
 {
   lowlevel = new EmitNoXml();	// Do not emit xml by default
-  maxlinesize = mls;
   spaceremain = maxlinesize;
   needbreak = false;
   commentmode = false;
+  resetDefaultsPrettyPrint();
 }
 
 EmitPrettyPrint::~EmitPrettyPrint(void)
@@ -589,11 +597,21 @@ void EmitPrettyPrint::overflow(void)
     else
       break;
   }
+  int4 newspaceremain;
   if (!indentstack.empty())
-    spaceremain = indentstack.back();
+    newspaceremain = indentstack.back();
   else
-    spaceremain = maxlinesize;
+    newspaceremain = maxlinesize;
+  if (newspaceremain == spaceremain)
+    return;		// Line breaking doesn't give us any additional space
+  if (commentmode && (newspaceremain == spaceremain + commentfill.size()))
+    return;		// Line breaking doesn't give us any additional space
+  spaceremain = newspaceremain;
   lowlevel->tagLine(maxlinesize-spaceremain);
+  if (commentmode &&(commentfill.size() != 0)) {
+    lowlevel->print(commentfill.c_str(),EmitXml::comment_color);
+    spaceremain -= commentfill.size();
+  }
 }
 
 /// Content and markup is sent to the low-level emitter if appropriate. The
@@ -1212,4 +1230,12 @@ void EmitPrettyPrint::setMaxLineSize(int4 val)
   tokqueue.setMax(3*val);
   spaceremain = maxlinesize;
   clear();
+}
+
+void EmitPrettyPrint::resetDefaults(void)
+
+{
+  lowlevel->resetDefaults();
+  resetDefaultsInternal();
+  resetDefaultsPrettyPrint();
 }

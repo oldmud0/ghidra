@@ -23,10 +23,11 @@ import javax.swing.*;
 
 import docking.DialogComponentProvider;
 import docking.DockingWindowManager;
+import docking.widgets.combobox.GComboBox;
+import docking.widgets.label.GDLabel;
 import generic.util.WindowUtilities;
 import ghidra.framework.preferences.Preferences;
 import ghidra.util.NumericUtilities;
-import ghidra.util.SystemUtilities;
 
 public class AskDialog<T> extends DialogComponentProvider {
 	public final static int STRING = 0;
@@ -74,7 +75,7 @@ public class AskDialog<T> extends DialogComponentProvider {
 		JPanel panel = new JPanel(new BorderLayout(10, 10));
 		panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
 
-		label = new JLabel(message);
+		label = new GDLabel(message);
 		panel.add(label, BorderLayout.WEST);
 
 		if (choices == null) {
@@ -86,7 +87,7 @@ public class AskDialog<T> extends DialogComponentProvider {
 			panel.add(textField, BorderLayout.CENTER);
 		}
 		else {
-			comboField = new JComboBox<>(choices.toArray(new Object[choices.size()]));
+			comboField = new GComboBox<>(choices.toArray(new Object[choices.size()]));
 			comboField.setEditable(false);
 			comboField.setName("JComboBox");
 			if (defaultValue != null) {
@@ -95,12 +96,13 @@ public class AskDialog<T> extends DialogComponentProvider {
 			panel.add(comboField, BorderLayout.CENTER);
 		}
 
+		setTransient(true);
 		addWorkPanel(panel);
 		addOKButton();
 		addCancelButton();
 		setDefaultButton(okButton);
 		setRememberSize(false);
-		SystemUtilities.runSwingNow(() -> DockingWindowManager.showDialog(parent, AskDialog.this));
+		DockingWindowManager.showDialog(parent, AskDialog.this);
 	}
 
 	private void saveCurrentDimensions() {

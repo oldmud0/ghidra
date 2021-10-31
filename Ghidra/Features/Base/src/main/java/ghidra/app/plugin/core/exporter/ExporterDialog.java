@@ -20,7 +20,6 @@ import java.awt.Component;
 import java.io.File;
 import java.io.IOException;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.swing.*;
 import javax.swing.event.DocumentEvent;
@@ -29,9 +28,11 @@ import javax.swing.event.DocumentListener;
 import docking.DialogComponentProvider;
 import docking.options.editor.ButtonPanelFactory;
 import docking.widgets.OptionDialog;
+import docking.widgets.checkbox.GCheckBox;
 import docking.widgets.combobox.GhidraComboBox;
 import docking.widgets.filechooser.GhidraFileChooser;
 import docking.widgets.filechooser.GhidraFileChooserMode;
+import docking.widgets.label.GLabel;
 import ghidra.app.plugin.core.help.AboutDomainObjectUtils;
 import ghidra.app.util.*;
 import ghidra.app.util.exporter.Exporter;
@@ -51,8 +52,7 @@ import ghidra.util.filechooser.ExtensionFileFilter;
 import ghidra.util.filechooser.GhidraFileFilter;
 import ghidra.util.layout.PairLayout;
 import ghidra.util.layout.VerticalLayout;
-import ghidra.util.task.TaskLauncher;
-import ghidra.util.task.TaskMonitor;
+import ghidra.util.task.*;
 
 /**
  * Dialog for exporting a program from a Ghidra project to an external file in one of the
@@ -113,6 +113,10 @@ public class ExporterDialog extends DialogComponentProvider implements AddressFa
 		addOKButton();
 		addCancelButton();
 		setHelpLocation(new HelpLocation("ExporterPlugin", "Exporter_Dialog"));
+
+		// This dialog is temporary and will be closed when the task is finished.  Mark
+		// it transient so no other windows will be parented to this dialog.
+		setTransient(true);
 
 		// need to initialize a few things
 		selectedFormatChanged();
@@ -183,23 +187,23 @@ public class ExporterDialog extends DialogComponentProvider implements AddressFa
 	private Component buildMainPanel() {
 		JPanel panel = new JPanel(new PairLayout(5, 5));
 		panel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
-		panel.add(new JLabel("Format: ", SwingConstants.RIGHT));
+		panel.add(new GLabel("Format: ", SwingConstants.RIGHT));
 		panel.add(buildFormatChooser());
-		panel.add(new JLabel("Output File: ", SwingConstants.RIGHT));
+		panel.add(new GLabel("Output File: ", SwingConstants.RIGHT));
 		panel.add(buildFilePanel());
 		return panel;
 	}
 
 	private Component buildSelectionCheckboxPanel() {
 		JPanel panel = new JPanel(new PairLayout(5, 5));
-		selectionOnlyLabel = new JLabel("Selection Only:");
+		selectionOnlyLabel = new GLabel("Selection Only:");
 		panel.add(selectionOnlyLabel);
 		panel.add(buildSelectionCheckbox());
 		return panel;
 	}
 
 	private Component buildSelectionCheckbox() {
-		selectionCheckBox = new JCheckBox("");
+		selectionCheckBox = new GCheckBox("");
 		updateSelectionCheckbox();
 		return selectionCheckBox;
 	}
@@ -383,7 +387,11 @@ public class ExporterDialog extends DialogComponentProvider implements AddressFa
 
 	private String appendExporterFileExtension(String filename) {
 		Exporter exporter = getSelectedExporter();
-		String extension = "." + exporter.getDefaultFileExtension();
+		String extension = exporter.getDefaultFileExtension();
+		if (extension.isEmpty()) {
+			return filename;
+		}
+		extension = "." + extension;
 		if (!filename.toLowerCase().endsWith(extension.toLowerCase())) {
 			return filename + extension;
 		}
@@ -438,10 +446,65 @@ public class ExporterDialog extends DialogComponentProvider implements AddressFa
 
 	private boolean doExport() {
 
-		AtomicBoolean success = new AtomicBoolean();
-		TaskLauncher.launchModal("Exporting " + domainFile.getName(),
-			monitor -> success.set(tryExport(monitor)));
-		return success.get();
+		ExportTask task = new ExportTask();
+		TaskLauncher.launch(task);
+		task.showResults();
+		return task.getSuccess();
+	}
+
+	private class ExportTask extends Task {
+
+		private boolean success;
+		private boolean showResults;
+		private Exporter exporter;
+		private DomainObject exportedDomainObject;
+
+		public ExportTask() {
+			super("Export " + domainFile.getName(), true, true, true, false);
+		}
+
+		@Override
+		public void run(TaskMonitor monitor) throws CancelledException {
+
+			exporter = getSelectedExporter();
+
+			exporter.setExporterServiceProvider(tool);
+			exportedDomainObject = getDomainObject(monitor);
+			if (exportedDomainObject == null) {
+				return;
+			}
+			ProgramSelection selection = getApplicableProgramSeletion();
+			File outputFile = getSelectedOutputFile();
+
+			try {
+				if (outputFile.exists() &&
+					OptionDialog.showOptionDialog(getComponent(), "Overwrite Existing File?",
+						"The file " + outputFile + " already exists.\nDo you want to overwrite it?",
+						"Overwrite", OptionDialog.QUESTION_MESSAGE) != OptionDialog.OPTION_ONE) {
+					return;
+				}
+				if (options != null) {
+					exporter.setOptions(options);
+				}
+				success = exporter.export(outputFile, exportedDomainObject, selection, monitor);
+				showResults = true;
+			}
+			catch (Exception e) {
+				Msg.error(this, "Exception exporting", e);
+				SystemUtilities.runSwingLater(() -> setStatusText(
+					"Exception exporting: " + e.getMessage() + ".  If null, see log for details."));
+			}
+		}
+
+		void showResults() {
+			if (showResults) {
+				displaySummaryResults(exporter, exportedDomainObject);
+			}
+		}
+
+		boolean getSuccess() {
+			return success;
+		}
 	}
 
 	private boolean tryExport(TaskMonitor monitor) {
@@ -493,15 +556,13 @@ public class ExporterDialog extends DialogComponentProvider implements AddressFa
 		resultsBuffer.append("Format:                 " + exporter.getName() + "\n\n");
 
 		MessageLog log = exporter.getMessageLog();
-		if (log != null) {
-			resultsBuffer.append(log.toString());
-		}
+		resultsBuffer.append(log.toString());
 
 		HelpLocation helpLocation = new HelpLocation(GenericHelpTopics.ABOUT, "About_Program");
 
 		Object tmpConsumer = new Object();
 		obj.addConsumer(tmpConsumer);
-		SystemUtilities.runSwingLater(() -> {
+		Swing.runLater(() -> {
 			try {
 				AboutDomainObjectUtils.displayInformation(tool, obj.getDomainFile(),
 					obj.getMetadata(), "Export Results Summary", resultsBuffer.toString(),
@@ -514,9 +575,10 @@ public class ExporterDialog extends DialogComponentProvider implements AddressFa
 
 	}
 
-	/**************************************************
-	 * Methods for testing
-	 **************************************************/
+//==================================================================================================
+// Methods for Testing
+//==================================================================================================
+
 	JCheckBox getSelectionCheckBox() {
 		return selectionCheckBox;
 	}

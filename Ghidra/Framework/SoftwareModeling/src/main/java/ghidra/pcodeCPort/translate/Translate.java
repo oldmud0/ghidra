@@ -28,6 +28,7 @@ import ghidra.pcodeCPort.pcoderaw.VarnodeData;
 import ghidra.pcodeCPort.space.*;
 import ghidra.pcodeCPort.utils.AddrSpaceToIdSymmetryMap;
 import ghidra.pcodeCPort.xml.DocumentStorage;
+import ghidra.program.model.lang.BasicCompilerSpec;
 
 public abstract class Translate implements BasicSpaceProvider {
 
@@ -219,8 +220,6 @@ public abstract class Translate implements BasicSpaceProvider {
 	public void setContextDefault(String name, int val) {
 	}
 
-	public abstract void addRegister(String nm, AddrSpace base, long offset, int size);
-
 	public abstract VarnodeData getRegister(String nm);
 
 	public abstract String getRegisterName(AddrSpace base, long off, int size);
@@ -245,6 +244,9 @@ public abstract class Translate implements BasicSpaceProvider {
 		else if ("space_unique".equals(tp)) {
 			res = new UniqueSpace(this);
 		}
+		else if ("space_other".equals(tp)) {
+			res = new OtherSpace(this);
+		}
 		else {
 			res = new AddrSpace(this, spacetype.IPTR_PROCESSOR);
 		}
@@ -255,7 +257,11 @@ public abstract class Translate implements BasicSpaceProvider {
 
 	protected void restoreXmlSpaces(Element el) {
 		// The first space should always be the constant space
-		insertSpace(new ConstantSpace(this, "const", 0));
+		insertSpace(new ConstantSpace(this, "const", BasicCompilerSpec.CONSTANT_SPACE_INDEX));
+
+		// The second space should always be the other space
+		insertSpace(new OtherSpace(this, BasicCompilerSpec.OTHER_SPACE_NAME,
+			BasicCompilerSpec.OTHER_SPACE_INDEX));
 
 		String defname = el.getAttributeValue("defaultspace");
 		List<?> children = el.getChildren();
@@ -283,15 +289,6 @@ public abstract class Translate implements BasicSpaceProvider {
 			}
 		}
 		return null;
-	}
-
-	void addRegisterList(String[] nms, int num, AddrSpace base, long offset, int size, int skip) { // Add names assigning indices in order
-		// allocating -size- space for each starting at -offset-
-		int i;
-
-		for (i = 0; i < num; ++i) {
-			addRegister(nms[i], base, offset + skip * i, size);
-		}
 	}
 
 	// Associate a particular register or memory location with an address space
@@ -399,6 +396,11 @@ public abstract class Translate implements BasicSpaceProvider {
 				}
 				// fallthru
 			case IPTR_PROCESSOR:
+				if (spc.isOtherSpace()) {
+					if (spc.getIndex() != BasicCompilerSpec.OTHER_SPACE_INDEX) {
+						throw new LowlevelError("OTHER space must be assigned index 1");
+					}
+				}
 				for (AddrSpace space : baselist) {
 					if (space.getName().equals(spc.getName())) {
 						duplicatedefine = true;
@@ -529,8 +531,8 @@ public abstract class Translate implements BasicSpaceProvider {
 
 	public AddrSpace getSpaceBySpacebase(Address loc, int size) { // Get space associated with spacebase register
 		AddrSpace id;
-		for (int i = 0; i < baselist.size(); ++i) {
-			id = baselist.get(i);
+		for (AddrSpace element : baselist) {
+			id = element;
 			int numspace = numSpacebase(id);
 			for (int j = 0; j < numspace; ++j) {
 				VarnodeData point = getSpacebase(id, j);

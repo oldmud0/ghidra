@@ -17,47 +17,75 @@ package ghidra.program.model.data;
 
 import java.util.*;
 
-import ghidra.app.plugin.core.datamgr.archive.SourceArchive;
 import ghidra.docking.settings.Settings;
+import ghidra.program.model.data.AlignedStructurePacker.StructurePackResult;
 import ghidra.program.model.mem.MemBuffer;
+import ghidra.util.Msg;
 import ghidra.util.UniversalID;
-import ghidra.util.exception.InvalidInputException;
+import ghidra.util.exception.AssertException;
 
 /**
- * Basic implementation of the structure data type
+ * Basic implementation of the structure data type.
+ * NOTE: Implementation is not thread safe when being modified.
  */
-public class StructureDataType extends CompositeDataTypeImpl implements Structure {
-	private final static long serialVersionUID = 1;
-	private static Comparator<Object> ordinalComparator = new OrdinalComparator();
-	protected static Comparator<Object> offsetComparator = new OffsetComparator();
+public class StructureDataType extends CompositeDataTypeImpl implements StructureInternal {
+
 	protected int structLength;
+	private int structAlignment;
+
 	protected int numComponents; // excludes optional flexible array component
 	protected List<DataTypeComponentImpl> components;
+
 	private DataTypeComponentImpl flexibleArrayComponent;
 
 	/**
-	 * Construct a new structure with the given name and number of undefined bytes
+	 * Construct a new structure with the given name and length. The root category will be used.
+	 * 
 	 * @param name the name of the new structure
-	 * @param length the initial size of the structure
+	 * @param length the initial size of the structure in bytes. If 0 is specified the structure
+	 *            will report its length as 1 and {@link #isNotYetDefined()} will return true.
 	 */
 	public StructureDataType(String name, int length) {
 		this(CategoryPath.ROOT, name, length);
 	}
 
+	/**
+	 * Construct a new structure with the given name, length and datatype manager which conveys data
+	 * organization. The root category will be used.
+	 * 
+	 * @param name the name of the new structure
+	 * @param length the initial size of the structure in bytes. If 0 is specified the structure
+	 *            will report its length as 1 and {@link #isNotYetDefined()} will return true.
+	 * @param dtm the data type manager associated with this data type. This can be null. Also, the
+	 *            data type manager may not yet contain this actual data type.
+	 */
 	public StructureDataType(String name, int length, DataTypeManager dtm) {
 		this(CategoryPath.ROOT, name, length, dtm);
 	}
 
 	/**
-	 * Construct a new structure with the given name and number of undefined bytes
+	 * Construct a new structure with the given name and length within the specified categry path.
+	 * 
 	 * @param path the category path indicating where this data type is located.
 	 * @param name the name of the new structure
-	 * @param length the initial size of the structure
+	 * @param length the initial size of the structure in bytes. If 0 is specified the structure
+	 *            will report its length as 1 and {@link #isNotYetDefined()} will return true.
 	 */
 	public StructureDataType(CategoryPath path, String name, int length) {
 		this(path, name, length, null);
 	}
 
+	/**
+	 * Construct a new structure with the given name, length and datatype manager within the
+	 * specified categry path.
+	 * 
+	 * @param path the category path indicating where this data type is located.
+	 * @param name the name of the new structure
+	 * @param length the initial size of the structure in bytes. If 0 is specified the structure
+	 *            will report its length as 1 and {@link #isNotYetDefined()} will return true.
+	 * @param dtm the data type manager associated with this data type. This can be null. Also, the
+	 *            data type manager may not yet contain this actual data type.
+	 */
 	public StructureDataType(CategoryPath path, String name, int length, DataTypeManager dtm) {
 		super(path, name, dtm);
 		if (length < 0) {
@@ -70,12 +98,19 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 	}
 
 	/**
-	 * Construct a new structure with the given name and number of undefined bytes
+	 * Construct a new structure with the given name and length
+	 * 
 	 * @param path the category path indicating where this data type is located.
 	 * @param name the name of the new structure
-	 * @param length the initial size of the structure
-	 * @param dataTypeManager the data type manager associated with this data type. This can be null. 
-	 * Also, the data type manager may not contain this actual data type.
+	 * @param length the initial size of the structure in bytes. If 0 is specified the structure
+	 *            will report its length as 1 and {@link #isNotYetDefined()} will return true.
+	 * @param universalID the id for the data type
+	 * @param sourceArchive the source archive for this data type
+	 * @param lastChangeTime the last time this data type was changed
+	 * @param lastChangeTimeInSourceArchive the last time this data type was changed in its source
+	 *            archive.
+	 * @param dtm the data type manager associated with this data type. This can be null. Also, the
+	 *            data type manager may not yet contain this actual data type.
 	 */
 	public StructureDataType(CategoryPath path, String name, int length, UniversalID universalID,
 			SourceArchive sourceArchive, long lastChangeTime, long lastChangeTimeInSourceArchive,
@@ -97,7 +132,23 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 
 	@Override
 	public boolean isNotYetDefined() {
-		return structLength == 0 && flexibleArrayComponent == null;
+		return structLength == 0 && flexibleArrayComponent == null &&
+			isDefaultAligned() && !isPackingEnabled();
+	}
+
+	@Override
+	public int getAlignment() {
+		if (structAlignment > 0) {
+			return structAlignment;
+		}
+		if (isPackingEnabled()) {
+			StructurePackResult packResult = AlignedStructureInspector.packComponents(this);
+			structAlignment = packResult.alignment;
+		}
+		else {
+			structAlignment = getNonPackedAlignment();
+		}
+		return structAlignment;
 	}
 
 	@Override
@@ -105,11 +156,17 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 		if (offset >= structLength || offset < 0) {
 			return null;
 		}
-		int index = Collections.binarySearch(components, new Integer(offset), offsetComparator);
+		int index = Collections.binarySearch(components, Integer.valueOf(offset),
+			OffsetComparator.INSTANCE);
 		if (index >= 0) {
-			return components.get(index);
+			DataTypeComponent dtc = components.get(index);
+			if (dtc.isBitFieldComponent()) {
+				index = backupToFirstComponentContainingOffset(index, offset);
+				dtc = components.get(index);
+			}
+			return dtc;
 		}
-		else if (isInternallyAligned()) {
+		else if (isPackingEnabled()) {
 			return null;
 		}
 		index = -index - 1;
@@ -134,47 +191,144 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 	}
 
 	@Override
+	public boolean isZeroLength() {
+		return structLength == 0;
+	}
+
+	@Override
 	public int getLength() {
 		if (structLength == 0) {
-			return 1; // lie about our length if not yet defined
+			return 1; // 0-length datatype not supported
 		}
 		return structLength;
 	}
 
 	@Override
-	public void delete(int index) {
-		if (index < 0 || index >= numComponents) {
-			throw new ArrayIndexOutOfBoundsException(index);
-		}
-		int idx = Collections.binarySearch(components, new Integer(index), ordinalComparator);
-		if (idx >= 0) {
-			DataTypeComponent dtc = components.remove(idx);
-			shiftOffsets(idx, -1, -dtc.getLength());
-			return;
-		}
-		idx = -idx - 1;
-		shiftOffsets(idx, -1, -1);
-		adjustInternalAlignment();
-		notifySizeChanged();
+	public boolean hasLanguageDependantLength() {
+		return isPackingEnabled();
 	}
 
 	@Override
-	public void delete(int[] ordinals) {
-		for (int ordinal : ordinals) {
-			delete(ordinal);
+	public void delete(int ordinal) {
+		if (ordinal < 0 || ordinal >= numComponents) {
+			throw new IndexOutOfBoundsException(ordinal);
+		}
+		int idx;
+		if (isPackingEnabled()) {
+			idx = ordinal;
+		}
+		else {
+			idx = Collections.binarySearch(components, Integer.valueOf(ordinal),
+				OrdinalComparator.INSTANCE);
+		}
+		if (idx >= 0) {
+			doDelete(idx);
+		}
+		else {
+			// assume non-packed removal of DEFAULT
+			idx = -idx - 1;
+			shiftOffsets(idx, -1, -1);
+		}
+		repack(false);
+		notifySizeChanged();
+	}
+
+	private void doDelete(int index) {
+		DataTypeComponentImpl dtc = components.remove(index);
+		dtc.getDataType().removeParent(this);
+		if (isPackingEnabled()) {
+			return;
+		}
+		int shiftAmount = dtc.isBitFieldComponent() ? 0 : dtc.getLength();
+		shiftOffsets(index, -1, -shiftAmount);
+	}
+
+	@Override
+	public void delete(Set<Integer> ordinals) {
+
+		if (ordinals.isEmpty()) {
+			return;
+		}
+
+		boolean bitFieldRemoved = false;
+
+		TreeSet<Integer> treeSet = null;
+		if (!isPackingEnabled()) {
+			// treeSet only used to track undefined filler removal
+			treeSet = new TreeSet<>(ordinals);
+		}
+
+		List<DataTypeComponentImpl> newComponents = new ArrayList<>();
+		int ordinalAdjustment = 0;
+		int offsetAdjustment = 0;
+		int lastDefinedOrdinal = -1;
+		for (DataTypeComponentImpl dtc : components) {
+			int ordinal = dtc.getOrdinal();
+			if (treeSet != null && lastDefinedOrdinal < (ordinal - 1)) {
+				// Identify removed filler since last defined component
+				Set<Integer> removedFillerSet = treeSet.subSet(lastDefinedOrdinal + 1, ordinal);
+				if (!removedFillerSet.isEmpty()) {
+					int undefinedRemoveCount = removedFillerSet.size();
+					ordinalAdjustment -= undefinedRemoveCount;
+					offsetAdjustment -= undefinedRemoveCount;
+				}
+			}
+			if (ordinals.contains(ordinal)) {
+				// defined component removed
+				if (dtc.isBitFieldComponent()) {
+					// defer reconciling bitfield space to repack
+					bitFieldRemoved = true;
+				}
+				else {
+					offsetAdjustment -= dtc.getLength();
+				}
+				--ordinalAdjustment;
+				lastDefinedOrdinal = ordinal;
+			}
+			else {
+
+				if (ordinalAdjustment != 0) {
+					shiftOffset(dtc, ordinalAdjustment, offsetAdjustment);
+				}
+				newComponents.add(dtc);
+				lastDefinedOrdinal = ordinal;
+			}
+		}
+		if (treeSet != null) {
+			// Identify removed filler after last defined component
+			Set<Integer> removedFillerSet = treeSet.subSet(lastDefinedOrdinal + 1, numComponents);
+			if (!removedFillerSet.isEmpty()) {
+				int undefinedRemoveCount = removedFillerSet.size();
+				ordinalAdjustment -= undefinedRemoveCount;
+				offsetAdjustment -= undefinedRemoveCount;
+			}
+		}
+
+		components = newComponents;
+		numComponents += ordinalAdjustment;
+
+		if (isPackingEnabled()) {
+			repack(true);
+		}
+		else {
+			structLength += offsetAdjustment;
+			if (bitFieldRemoved) {
+				repack(false);
+			}
+			notifySizeChanged();
 		}
 	}
 
 	private void shiftOffsets(int index, int deltaOrdinal, int deltaOffset) {
 		for (int i = index; i < components.size(); i++) {
 			DataTypeComponentImpl dtc = components.get(i);
-			shiftOffsets(dtc, deltaOrdinal, deltaOffset);
+			shiftOffset(dtc, deltaOrdinal, deltaOffset);
 		}
 		structLength += deltaOffset;
 		numComponents += deltaOrdinal;
 	}
 
-	protected void shiftOffsets(DataTypeComponentImpl dtc, int deltaOrdinal, int deltaOffset) {
+	protected void shiftOffset(DataTypeComponentImpl dtc, int deltaOrdinal, int deltaOffset) {
 		dtc.setOffset(dtc.getOffset() + deltaOffset);
 		dtc.setOrdinal(dtc.getOrdinal() + deltaOrdinal);
 	}
@@ -185,12 +339,14 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 			return flexibleArrayComponent;
 		}
 		if (index < 0 || index >= numComponents) {
-			throw new ArrayIndexOutOfBoundsException(index);
+			throw new IndexOutOfBoundsException(index);
 		}
-		int idx = Collections.binarySearch(components, new Integer(index), ordinalComparator);
+		int idx = Collections.binarySearch(components, Integer.valueOf(index),
+			OrdinalComparator.INSTANCE);
 		if (idx >= 0) {
 			return components.get(idx);
 		}
+		// assume non-packed DEFAULT
 		int offset = 0;
 		idx = -idx - 1;
 		if (idx == 0) {
@@ -215,22 +371,56 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 	}
 
 	@Override
-	public DataTypeComponent insertAtOffset(int offset, DataType dataType, int length,
-			String componentName, String comment) {
+	protected int getPreferredComponentLength(DataType dataType, int length) {
+		if (isPackingEnabled() && !(dataType instanceof Dynamic)) {
+			length = -1;
+		}
+		return super.getPreferredComponentLength(dataType, length);
+	}
+
+	@Override
+	public final DataTypeComponentImpl insertAtOffset(int offset, DataType dataType, int length) {
+		return insertAtOffset(offset, dataType, length, null, null);
+	}
+
+	@Override
+	public DataTypeComponentImpl insertAtOffset(int offset, DataType dataType, int length,
+			String componentName, String comment) throws IllegalArgumentException {
+
 		if (offset < 0) {
 			throw new IllegalArgumentException("Offset cannot be negative.");
 		}
-		validateDataType(dataType);
-		if (offset > structLength) {
+
+		if (dataType instanceof BitFieldDataType) {
+			BitFieldDataType bfDt = (BitFieldDataType) dataType;
+			if (length <= 0) {
+				length = dataType.getLength();
+			}
+			try {
+				return insertBitFieldAt(offset, length, bfDt.getBitOffset(), bfDt.getBaseDataType(),
+					bfDt.getDeclaredBitSize(), componentName, comment);
+			}
+			catch (InvalidDataTypeException e) {
+				throw new AssertException(e);
+			}
+		}
+
+		dataType = validateDataType(dataType);
+
+		dataType = dataType.clone(dataMgr);
+		checkAncestry(dataType);
+
+		if ((offset > structLength) && !isPackingEnabled()) {
 			numComponents = numComponents + (offset - structLength);
 			structLength = offset;
 		}
-		checkAncestry(dataType);
 
-		int index = Collections.binarySearch(components, new Integer(offset), offsetComparator);
+		int index = Collections.binarySearch(components, Integer.valueOf(offset),
+			OffsetComparator.INSTANCE);
 
 		int additionalShift = 0;
 		if (index >= 0) {
+			index = backupToFirstComponentContainingOffset(index, offset);
 			DataTypeComponent dtc = components.get(index);
 			additionalShift = offset - dtc.getOffset();
 		}
@@ -245,80 +435,89 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 		}
 
 		if (dataType == DataType.DEFAULT) {
+			// assume non-packed insert of DEFAULT
 			shiftOffsets(index, 1 + additionalShift, 1 + additionalShift);
 			return new DataTypeComponentImpl(DataType.DEFAULT, this, 1, ordinal, offset);
 		}
 
-		dataType = dataType.clone(getDataTypeManager());
-
-		// TODO Is this the right place to adjust the length?
-		int dtLength = dataType.getLength();
-		if (dtLength > 0 && dtLength < length) {
-			length = dtLength;
-		}
+		length = getPreferredComponentLength(dataType, length);
 
 		DataTypeComponentImpl dtc = new DataTypeComponentImpl(dataType, this, length, ordinal,
 			offset, componentName, comment);
 		dataType.addParent(this);
 		shiftOffsets(index, 1 + additionalShift, dtc.getLength() + additionalShift);
 		components.add(index, dtc);
-		adjustInternalAlignment();
+		repack(false);
 		notifySizeChanged();
 		return dtc;
 	}
 
 	@Override
-	public DataTypeComponent insertAtOffset(int offset, DataType dataType, int length) {
-		return insertAtOffset(offset, dataType, length, null, null);
-	}
-
-	@Override
 	public DataTypeComponent add(DataType dataType, int length, String componentName,
 			String comment) {
-		if (length < 1) {
-			throw new IllegalArgumentException("Length of " + componentName + ": '" + dataType +
-				"' in structure '" + this.name + "' must be >= 1!");
-		}
-		return doAdd(dataType, length, componentName, comment, true, true);
+		return doAdd(dataType, length, false, componentName, comment, true);
 	}
 
-	public void add(DataType dataType, int length, String componentName, String comment,
-			int numCopies) {
-		if (length < 1) {
-			throw new IllegalArgumentException("Length of " + componentName + ": '" + dataType +
-				"' in structure '" + this.name + "' must be >= 1!");
-		}
-		for (int ii = 0; ii < numCopies; ++ii) {
-			doAdd(dataType, length, componentName, comment, false, false);
-		}
-		adjustInternalAlignment();
-		notifySizeChanged();
-	}
+	/**
+	 * Add a new component to the end of this structure.
+	 * <p>
+	 * NOTE: This method differs from inserting to the end the structure for the non-packed case in
+	 * that this method will always grow the structure by the positive length specified while the
+	 * insert may limit its growth by the length of a smaller fixed-length dataType.
+	 * 
+	 * @param dataType component data type
+	 * @param length maximum component length or -1 to use length of fixed-length dataType after
+	 *            applying structures data organization as determined by data type manager. If
+	 *            dataType is Dynamic, a positive length must be specified.
+	 * @param isFlexibleArray if true length is ignored and the trailing flexible array will be set
+	 *            based upon the specified fixed-length dataType;
+	 * @param componentName component name
+	 * @param comment component comment
+	 * @param packAndNotify if true perform repack and provide change notification
+	 * @return newly added component
+	 * @throws IllegalArgumentException if the specified data type is not allowed to be added to
+	 *             this composite data type or an invalid length is specified.
+	 */
+	private DataTypeComponent doAdd(DataType dataType, int length, boolean isFlexibleArray,
+			String componentName, String comment, boolean packAndNotify)
+			throws IllegalArgumentException {
 
-	private DataTypeComponent doAdd(DataType dataType, int length, String componentName,
-			String comment, boolean notify, boolean align) {
-		validateDataType(dataType);
+		if (isFlexibleArray && isInvalidFlexArrayDataType(dataType)) {
+			throw new IllegalArgumentException(
+				"Unsupported flexType: " + dataType.getDisplayName());
+		}
+
+		dataType = validateDataType(dataType);
+
+		dataType = dataType.clone(dataMgr);
+
 		checkAncestry(dataType);
 
 		DataTypeComponentImpl dtc;
-		boolean isFlexibleArray = false;
 		if (dataType == DataType.DEFAULT) {
-			dtc = new DataTypeComponentImpl(DataType.DEFAULT, this, 1, numComponents, structLength);
+			// FIXME: verify - does not appear to modify structure
+			dtc =
+				new DataTypeComponentImpl(DataType.DEFAULT, this, 1, numComponents, structLength);
 		}
 		else {
+
 			int offset = structLength;
 			int ordinal = numComponents;
-			isFlexibleArray = (length == 0);
-			if (length == 0) {
+
+			int componentLength;
+			if (isFlexibleArray) {
 				// assume trailing flexible array component
 				offset = -1;
 				ordinal = -1;
-				isFlexibleArray = true;
 				clearFlexibleArrayComponent();
+				componentLength = 0;
 			}
-			dataType = dataType.clone(getDataTypeManager());
-			dtc = new DataTypeComponentImpl(dataType, this, length, ordinal, offset, componentName,
-				comment);
+			else {
+				componentLength = getPreferredComponentLength(dataType, length);
+			}
+
+			dtc = new DataTypeComponentImpl(dataType, this, componentLength, ordinal, offset,
+				componentName, comment);
 			dataType.addParent(this);
 			if (isFlexibleArray) {
 				flexibleArrayComponent = dtc;
@@ -328,13 +527,17 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 			}
 		}
 		if (!isFlexibleArray) {
+
+			int structureGrowth = dtc.getLength();
+			if (!isPackingEnabled() && length > 0) {
+				structureGrowth = length;
+			}
+
 			numComponents++;
-			structLength += dtc.getLength();
+			structLength += structureGrowth;
 		}
-		if (align) {
-			adjustInternalAlignment();
-		}
-		if (notify) {
+		if (packAndNotify) {
+			repack(false);
 			notifySizeChanged();
 		}
 		return dtc;
@@ -342,40 +545,58 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 
 	@Override
 	public void growStructure(int amount) {
-		numComponents += amount;
-		structLength += amount;
-		adjustInternalAlignment();
+		if (isPackingEnabled()) {
+			return;
+		}
+		doGrowStructure(amount);
+		repack(false);
 		notifySizeChanged();
 	}
 
 	@Override
 	public DataTypeComponent insert(int index, DataType dataType, int length, String componentName,
-			String comment) {
+			String comment) throws IndexOutOfBoundsException, IllegalArgumentException {
 		if (index < 0 || index > numComponents) {
-			throw new ArrayIndexOutOfBoundsException(index);
+			throw new IndexOutOfBoundsException(index);
 		}
 		if (index == numComponents) {
 			return add(dataType, length, componentName, comment);
 		}
-		validateDataType(dataType);
+		dataType = validateDataType(dataType);
+
+		dataType = dataType.clone(dataMgr);
 		checkAncestry(dataType);
 
-		int idx = Collections.binarySearch(components, new Integer(index), ordinalComparator);
+		int idx;
+		if (isPackingEnabled()) {
+			idx = index;
+		}
+		else {
+			// TODO: could improve insertion of bitfield which does not intersect
+			// existing ordinal bitfield at the bit-level
+			idx = Collections.binarySearch(components, Integer.valueOf(index),
+				OrdinalComparator.INSTANCE);
+			if (idx > 0) {
+				DataTypeComponentImpl existingDtc = components.get(idx);
+				if (existingDtc.isBitFieldComponent()) {
+					// must shift down to eliminate possible overlap with previous component 
+					DataTypeComponentImpl previousDtc = components.get(idx - 1);
+					if (previousDtc.getEndOffset() == existingDtc.getOffset()) {
+						shiftOffsets(idx, 0, 1);
+					}
+				}
+			}
+		}
 		if (idx < 0) {
 			idx = -idx - 1;
 		}
 		if (dataType == DataType.DEFAULT) {
+			// assume non-packed insert of DEFAULT
 			shiftOffsets(idx, 1, 1);
 			return getComponent(index);
 		}
 
-		dataType = dataType.clone(getDataTypeManager());
-
-		// TODO Is this the right place to adjust the length?
-		int dtLength = dataType.getLength();
-		if (dtLength > 0 && dtLength < length) {
-			length = dtLength;
-		}
+		length = getPreferredComponentLength(dataType, length);
 
 		int offset = (getComponent(index)).getOffset();
 		DataTypeComponentImpl dtc = new DataTypeComponentImpl(dataType, this, length, index, offset,
@@ -383,24 +604,210 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 		dataType.addParent(this);
 		shiftOffsets(idx, 1, dtc.getLength());
 		components.add(idx, dtc);
-		adjustInternalAlignment();
+		repack(false);
 		notifySizeChanged();
 		return dtc;
 	}
 
 	@Override
-	public void insert(int ordinal, DataType dataType, int length, String name, String comment,
-			int numCopies) {
+	public DataTypeComponent addBitField(DataType baseDataType, int bitSize, String componentName,
+			String comment) throws InvalidDataTypeException {
+
+		BitFieldDataType.checkBaseDataType(baseDataType);
+		baseDataType = baseDataType.clone(dataMgr);
+
+		BitFieldDataType bitFieldDt = new BitFieldDataType(baseDataType, bitSize);
+		return add(bitFieldDt, bitFieldDt.getStorageSize(), componentName, comment);
+	}
+
+	@Override
+	public DataTypeComponent insertBitField(int ordinal, int byteWidth, int bitOffset,
+			DataType baseDataType, int bitSize, String componentName, String comment)
+			throws InvalidDataTypeException, IndexOutOfBoundsException {
+
 		if (ordinal < 0 || ordinal > numComponents) {
-			throw new ArrayIndexOutOfBoundsException(ordinal);
+			throw new IndexOutOfBoundsException(ordinal);
 		}
-		if (ordinal == numComponents) {
-			add(dataType, length, name, comment, numCopies);
-			return;
+
+		BitFieldDataType.checkBaseDataType(baseDataType);
+		baseDataType = baseDataType.clone(dataMgr);
+
+		if (!isPackingEnabled()) {
+			int offset = structLength;
+			if (ordinal < numComponents) {
+				offset = getComponent(ordinal).getOffset();
+			}
+			return insertBitFieldAt(offset, byteWidth, bitOffset, baseDataType, bitSize,
+				componentName, comment);
 		}
-		for (int ii = 0; ii < numCopies; ++ii) {
-			insert(ordinal + ii, dataType, length, name, comment);
+
+		// handle aligned bitfield insertion
+		BitFieldDataType bitFieldDt = new BitFieldDataType(baseDataType, bitSize);
+		return insert(ordinal, bitFieldDt, bitFieldDt.getStorageSize(), componentName, comment);
+	}
+
+	@Override
+	public DataTypeComponentImpl insertBitFieldAt(int byteOffset, int byteWidth, int bitOffset,
+			DataType baseDataType, int bitSize, String componentName, String comment)
+			throws InvalidDataTypeException {
+
+		if (byteOffset < 0 || bitSize < 0) {
+			throw new IllegalArgumentException(
+				"Negative values not permitted when defining bitfield");
 		}
+		if (byteWidth <= 0) {
+			throw new IllegalArgumentException("Invalid byteWidth");
+		}
+
+		BitFieldDataType.checkBaseDataType(baseDataType);
+		baseDataType = baseDataType.clone(dataMgr);
+
+		int effectiveBitSize =
+			BitFieldDataType.getEffectiveBitSize(bitSize, baseDataType.getLength());
+
+		int minByteWidth = BitFieldDataType.getMinimumStorageSize(effectiveBitSize + bitOffset);
+		if (byteWidth < minByteWidth) {
+			throw new IllegalArgumentException(
+				"Bitfield does not fit within specified constraints");
+		}
+
+		boolean bigEndian = getDataOrganization().isBigEndian();
+
+		boolean hasConflict = false;
+		int additionalShift = 0;
+
+		int startBitOffset = BitOffsetComparator.getNormalizedBitfieldOffset(byteOffset, byteWidth,
+			effectiveBitSize, bitOffset, bigEndian);
+
+		Comparator<Object> bitOffsetComparator =
+			bigEndian ? BitOffsetComparator.INSTANCE_BE : BitOffsetComparator.INSTANCE_LE;
+		int startIndex = Collections.binarySearch(components, Integer.valueOf(startBitOffset),
+			bitOffsetComparator);
+		if (startIndex < 0) {
+			startIndex = -startIndex - 1;
+		}
+		else {
+			hasConflict = true;
+			DataTypeComponentImpl dtc = components.get(startIndex);
+			if (bitSize == 0 || dtc.isZeroBitFieldComponent()) {
+				hasConflict = dtc.getOffset() != (startBitOffset / 8);
+			}
+			if (hasConflict) {
+				additionalShift = byteOffset - dtc.getOffset();
+			}
+		}
+
+		int ordinal; // computed ordinal will be adjusted after insertion complete
+		if (startIndex < components.size()) {
+			DataTypeComponentImpl dtc = components.get(startIndex);
+			ordinal = dtc.getOrdinal();
+		}
+		else {
+			ordinal = startIndex;
+		}
+
+		if (isPackingEnabled()) {
+			insertBitField(ordinal, 0, 0, baseDataType, effectiveBitSize, componentName, comment);
+		}
+
+		int endIndex = startIndex;
+		if (startIndex < components.size()) {
+			// some shifting of components may be required
+			int endBitOffset = startBitOffset;
+			if (effectiveBitSize != 0) {
+				endBitOffset += effectiveBitSize - 1;
+			}
+			endIndex = Collections.binarySearch(components, Integer.valueOf(endBitOffset),
+				bitOffsetComparator);
+			if (endIndex < 0) {
+				endIndex = -endIndex - 1;
+			}
+			else if (effectiveBitSize != 0) {
+				hasConflict = true;
+			}
+		}
+
+		if (startIndex != endIndex) {
+			hasConflict = true;
+		}
+
+		// Any conflict will force a full insertion of byteWidth
+		if (hasConflict) {
+			shiftOffsets(startIndex, 1, byteWidth + additionalShift);
+		}
+
+		int requiredLength = byteOffset + byteWidth;
+		if (requiredLength > structLength) {
+			structLength = requiredLength;
+		}
+
+		// adjust for minimal storage use
+		int storageBitOffset = bitOffset % 8;
+		int revisedOffset;
+		if (bigEndian) {
+			revisedOffset = byteOffset + byteWidth - ((effectiveBitSize + bitOffset + 7) / 8);
+		}
+		else {
+			revisedOffset = byteOffset + (bitOffset / 8);
+		}
+
+		BitFieldDataType bitfieldDt = new BitFieldDataType(baseDataType, bitSize, storageBitOffset);
+
+		DataTypeComponentImpl dtc = new DataTypeComponentImpl(bitfieldDt, this,
+			bitfieldDt.getStorageSize(), ordinal, revisedOffset, componentName, comment);
+		bitfieldDt.addParent(this); // currently has no affect
+
+		components.add(startIndex, dtc);
+		adjustNonPackedComponents();
+		notifySizeChanged();
+		return dtc;
+	}
+
+	/**
+	 * Backup from specified ordinal to the first component which contains the specified offset. For
+	 * normal components the specified ordinal will be returned, however for bit-fields the ordinal
+	 * of the first bit-field containing the specified offset will be returned.
+	 * 
+	 * @param index component ordinal
+	 * @param offset offset within structure
+	 * @return index of first defined component containing specific offset.
+	 */
+	private int backupToFirstComponentContainingOffset(int index, int offset) {
+		if (index == 0) {
+			return 0;
+		}
+		DataTypeComponentImpl dtc = components.get(index);
+		while (index != 0 && dtc.isBitFieldComponent()) {
+			DataTypeComponentImpl previous = components.get(index - 1);
+			if (!previous.containsOffset(offset)) {
+				break;
+			}
+			dtc = previous;
+			--index;
+		}
+		return index;
+	}
+
+	/**
+	 * Advance from specified ordinal to the last component which contains the specified offset. For
+	 * normal components the specified ordinal will be returned, however for bit-fields the ordinal
+	 * of the last bit-field containing the specified offset will be returned.
+	 * 
+	 * @param index defined component index
+	 * @param offset offset within structure
+	 * @return index of last defined component containing specific offset.
+	 */
+	private int advanceToLastComponentContainingOffset(int index, int offset) {
+		DataTypeComponentImpl dtc = components.get(index);
+		while (index < (components.size() - 1) && dtc.isBitFieldComponent()) {
+			DataTypeComponentImpl next = components.get(index + 1);
+			if (!next.containsOffset(offset)) {
+				break;
+			}
+			dtc = next;
+			++index;
+		}
+		return index;
 	}
 
 	@Override
@@ -408,141 +815,139 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 		if (offset < 0) {
 			throw new IllegalArgumentException("Offset cannot be negative.");
 		}
-		int index = Collections.binarySearch(components, new Integer(offset), offsetComparator);
-		int delta = -1;
+		if (offset >= structLength) {
+			return;
+		}
+		int index = Collections.binarySearch(components, Integer.valueOf(offset),
+			OffsetComparator.INSTANCE);
+
+		int offsetDelta = 0;
+		int ordinalDelta = 0;
 		if (index < 0) {
 			index = -index - 1;
+			--ordinalDelta;
+			offsetDelta = -1;
+			shiftOffsets(index, ordinalDelta, offsetDelta);
 		}
 		else {
-			DataTypeComponent dtc = components.remove(index);
-			dtc.getDataType().removeParent(this);
-			delta = -dtc.getLength();
+			index = advanceToLastComponentContainingOffset(index, offset);
+			DataTypeComponentImpl dtc = components.get(index);
+			while (dtc.containsOffset(offset)) {
+				doDelete(index);
+				if (--index < 0) {
+					break;
+				}
+				dtc = components.get(index);
+			}
 		}
-		shiftOffsets(index, -1, delta);
-		adjustInternalAlignment();
+		repack(false);
 		notifySizeChanged();
 		return;
 	}
 
 	@Override
 	public boolean isEquivalent(DataType dataType) {
+
 		if (dataType == this) {
 			return true;
 		}
-		if (dataType == null) {
+		if (!(dataType instanceof StructureInternal)) {
 			return false;
 		}
 
-		if (dataType instanceof Structure) {
-			Structure struct = (Structure) dataType;
-			if (isInternallyAligned() != struct.isInternallyAligned() ||
-				isDefaultAligned() != struct.isDefaultAligned() ||
-				isMachineAligned() != struct.isMachineAligned() ||
-				getMinimumAlignment() != struct.getMinimumAlignment() ||
-				getPackingValue() != struct.getPackingValue() ||
-				(!isInternallyAligned() && (getLength() != struct.getLength()))) {
-				return false;
-			}
-
-			DataTypeComponent myFlexComp = getFlexibleArrayComponent();
-			DataTypeComponent otherFlexComp = struct.getFlexibleArrayComponent();
-			if (myFlexComp != null) {
-				if (otherFlexComp == null || !myFlexComp.isEquivalent(otherFlexComp)) {
-					return false;
-				}
-			}
-			else if (otherFlexComp != null) {
-				return false;
-			}
-
-			int myNumComps = getNumComponents();
-			int otherNumComps = struct.getNumComponents();
-			if (myNumComps != otherNumComps) {
-				return false;
-			}
-			for (int i = 0; i < myNumComps; i++) {
-				DataTypeComponent myDtc = getComponent(i);
-				DataTypeComponent otherDtc = struct.getComponent(i);
-
-				if (!myDtc.isEquivalent(otherDtc)) {
-					return false;
-				}
-			}
-			return true;
+		StructureInternal struct = (StructureInternal) dataType;
+		int otherLength = struct.isZeroLength() ? 0 : struct.getLength();
+		if (packing != struct.getStoredPackingValue() ||
+			minimumAlignment != struct.getStoredMinimumAlignment() ||
+			isZeroLength() != struct.isZeroLength() ||
+			(packing == NO_PACKING && structLength != otherLength)) {
+			return false;
 		}
-		return false;
+
+		DataTypeComponent myFlexComp = getFlexibleArrayComponent();
+		DataTypeComponent otherFlexComp = struct.getFlexibleArrayComponent();
+		if (myFlexComp != null) {
+			if (otherFlexComp == null || !myFlexComp.isEquivalent(otherFlexComp)) {
+				return false;
+			}
+		}
+		else if (otherFlexComp != null) {
+			return false;
+		}
+
+		int myNumComps = components.size();
+		int otherNumComps = struct.getNumDefinedComponents();
+		if (myNumComps != otherNumComps) {
+			return false;
+		}
+		DataTypeComponent[] otherDefinedComponents = struct.getDefinedComponents();
+		if (otherDefinedComponents.length != myNumComps) { // safety check
+			return false;
+		}
+		for (int i = 0; i < myNumComps; i++) {
+			DataTypeComponent myDtc = components.get(i);
+			DataTypeComponent otherDtc = otherDefinedComponents[i];
+			if (!myDtc.isEquivalent(otherDtc)) {
+				return false;
+			}
+		}
+		return true;
 	}
 
 	@Override
 	public void dataTypeSizeChanged(DataType dt) {
-		// TODO FIXME
+		if (dt instanceof BitFieldDataType) {
+			return; // unsupported
+		}
+		if (isPackingEnabled()) {
+			repack(true);
+			return;
+		}
+		int oldLength = structLength;
+		boolean changed = false;
 		int n = components.size();
-		boolean didChange = false;
 		for (int i = 0; i < n; i++) {
 			DataTypeComponentImpl dtc = components.get(i);
 			if (dtc.getDataType() == dt) {
-				int dtLen = dt.getLength();
+				// assume no impact to bitfields since base types
+				// should not change size
 				int dtcLen = dtc.getLength();
-				if (dtLen < dtcLen) {
-					dtc.setLength(dtLen);
-					shiftOffsets(i + 1, dtcLen - dtLen, 0);
-					didChange = true;
+				int length = dt.getLength();
+				if (length <= 0) {
+					length = dtcLen;
 				}
-				else if (dtLen > dtcLen) {
-					int consumed = consumeBytesAfter(i, dtLen - dtcLen);
+				if (length < dtcLen) {
+					dtc.setLength(length);
+					shiftOffsets(i + 1, dtcLen - length, 0);
+					changed = true;
+				}
+				else if (length > dtcLen) {
+					int consumed = consumeBytesAfter(i, length - dtcLen);
 					if (consumed > 0) {
 						shiftOffsets(i + 1, 0 - consumed, 0);
-						didChange = true;
+						changed = true;
 					}
 				}
 			}
 		}
-		adjustInternalAlignment();
-		if (didChange) {
-			notifySizeChanged();
+		if (changed) {
+			repack(false);
+			if (oldLength != structLength) {
+				notifySizeChanged();
+			}
 		}
 	}
 
 	@Override
 	public void dataTypeAlignmentChanged(DataType dt) {
-		adjustInternalAlignment();
-		// TODO FIXME
-//			checkDeleted();
-//			if (!isShowingUndefinedBytes()) {
-//				adjustPacking(getDataOrganization(), false, true);
-//				return;
-//			}
-//			int n = components.size();
-//			boolean didChange = false;
-//			for(int i=0;i<n;i++) {
-//				DataTypeComponentDB dtc = components.get(i);
-//				if (dtc.getDataType() == dt) {
-//					int dtLen = dt.getLength();
-//					int dtcLen = dtc.getLength();
-//					if (dtLen < dtcLen) {
-//						dtc.setLength(dtLen);
-//						dtc.updateRecord();
-//						shiftOffsets(i+1, dtcLen-dtLen, 0);
-//						didChange = true;
-//					}
-//					else if (dtLen > dtcLen) {
-//						int consumed = consumeBytesAfter(i, dtLen-dtcLen);
-//						if (consumed > 0) {
-//							dtc.updateRecord();
-//							shiftOffsets(i+1, -consumed, 0);
-//							didChange = true;
-//						}
-//					}
-//				}
-//			}
-//			if (didChange) {
-//				notifySizeChanged();
-//			}
+		if (isPackingEnabled()) {
+			repack(true);
+		}
 	}
 
 	/**
 	 * 
-	 * @param index the index of the defined component that is consuming the bytes.
+	 * @param definedComponentIndex the index of the defined component that is consuming the bytes.
 	 * @param numBytes the number of undefined bytes to consume
 	 * @return the number of bytes actually consumed
 	 */
@@ -573,21 +978,39 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 		return available;
 	}
 
+	/**
+	 * Create copy of structure for target dtm (source archive information is discarded). 
+	 * <p>
+	 * WARNING! copying non-packed structures which contain bitfields can produce invalid results when
+	 * switching endianess due to the differences in packing order.
+	 * 
+	 * @param dtm target data type manager
+	 * @return cloned structure
+	 */
 	@Override
 	public DataType copy(DataTypeManager dtm) {
-		StructureDataType struct = new StructureDataType(categoryPath, getName(), getLength(), dtm);
+		StructureDataType struct =
+			new StructureDataType(categoryPath, getName(), structLength, dtm);
 		struct.setDescription(getDescription());
 		struct.replaceWith(this);
 		return struct;
 	}
 
+	/**
+	 * Create cloned structure for target dtm preserving source archive information. WARNING!
+	 * cloning non-packed structures which contain bitfields can produce invalid results when
+	 * switching endianess due to the differences in packing order.
+	 * 
+	 * @param dtm target data type manager
+	 * @return cloned structure
+	 */
 	@Override
-	public DataType clone(DataTypeManager dtm) {
-		if (getDataTypeManager() == dtm) {
+	public StructureDataType clone(DataTypeManager dtm) {
+		if (dataMgr == dtm) {
 			return this;
 		}
 		StructureDataType struct =
-			new StructureDataType(categoryPath, getName(), getLength(), getUniversalID(),
+			new StructureDataType(categoryPath, getName(), structLength, getUniversalID(),
 				getSourceArchive(), getLastChangeTime(), getLastChangeTimeInSourceArchive(), dtm);
 		struct.setDescription(getDescription());
 		struct.replaceWith(this);
@@ -596,11 +1019,16 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 	}
 
 	@Override
-	public void clearComponent(int index) {
-		if (index < 0 || index >= numComponents) {
-			throw new ArrayIndexOutOfBoundsException(index);
+	public void clearComponent(int ordinal) {
+		if (isPackingEnabled()) {
+			delete(ordinal);
+			return;
 		}
-		int idx = Collections.binarySearch(components, new Integer(index), ordinalComparator);
+		if (ordinal < 0 || ordinal >= numComponents) {
+			throw new IndexOutOfBoundsException(ordinal);
+		}
+		int idx = Collections.binarySearch(components, Integer.valueOf(ordinal),
+			OrdinalComparator.INSTANCE);
 		if (idx >= 0) {
 			DataTypeComponent dtc = components.remove(idx);
 			dtc.getDataType().removeParent(this);
@@ -608,138 +1036,253 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 			if (len > 1) {
 				shiftOffsets(idx, len - 1, 0);
 			}
+			repack(false);
 		}
-		adjustInternalAlignment();
 	}
 
 	/**
-	 * Replaces the internal components of this structure with components of the
-	 * given structure. 
+	 * Replaces the internal components of this structure with components of the given structure
+	 * including packing and alignment settings.
+	 * 
 	 * @param dataType the structure to get the component information from.
-	 * @throws IllegalArgumentException if any of the component data types 
-	 * are not allowed to replace a component in this composite data type.
-	 * For example, suppose dt1 contains dt2. Therefore it is not valid
-	 * to replace a dt2 component with dt1 since this would cause a cyclic 
-	 * dependency.
-	 * @see ghidra.program.database.data.DataTypeDB#replaceWith(ghidra.program.model.data.DataType)
+	 * @throws IllegalArgumentException if any of the component data types are not allowed to
+	 *             replace a component in this composite data type. For example, suppose dt1
+	 *             contains dt2. Therefore it is not valid to replace a dt2 component with dt1 since
+	 *             this would cause a cyclic dependency.
 	 */
 	@Override
 	public void replaceWith(DataType dataType) {
-		if (!(dataType instanceof Structure)) {
+		if (!(dataType instanceof StructureInternal)) {
 			throw new IllegalArgumentException();
 		}
-		int oldLength = structLength;
-		doReplaceWith((Structure) dataType);
-		if (oldLength != structLength) {
-			notifySizeChanged();
+
+		StructureInternal struct = (StructureInternal) dataType;
+
+		components.clear();
+		numComponents = 0;
+		structLength = 0;
+		structAlignment = -1;
+
+		if (flexibleArrayComponent != null) {
+			flexibleArrayComponent.getDataType().removeParent(this);
+			flexibleArrayComponent = null;
+		}
+
+		this.packing = struct.getStoredPackingValue();
+		this.minimumAlignment = struct.getStoredMinimumAlignment();
+
+		if (struct.isPackingEnabled()) {
+			doReplaceWithAligned(struct);
+		}
+		else {
+			doReplaceWithUnaligned(struct);
+		}
+
+		DataTypeComponent flexComponent = struct.getFlexibleArrayComponent();
+		if (flexComponent != null) {
+			doAdd(flexComponent.getDataType(), 0, true, flexComponent.getFieldName(),
+				flexComponent.getComment(), false);
+		}
+
+		repack(false);
+		notifySizeChanged();
+	}
+
+// TODO: Rename
+	private void doReplaceWithAligned(Structure struct) {
+		// assumes components is clear and that alignment characteristics have been set
+		DataTypeComponent[] otherComponents = struct.getDefinedComponents();
+		for (DataTypeComponent dtc : otherComponents) {
+			DataType dt = dtc.getDataType();
+			int length = (dt instanceof Dynamic) ? dtc.getLength() : -1;
+			doAdd(dt, length, false, dtc.getFieldName(), dtc.getComment(), false);
 		}
 	}
 
-	private void doReplaceWith(Structure struct) {
-		components.clear();
-		flexibleArrayComponent = null;
-		if (struct.isNotYetDefined()) {
-			structLength = 0;
-			numComponents = 0;
+// TODO: Rename
+	private void doReplaceWithUnaligned(Structure struct) throws IllegalArgumentException {
+		// assumes components is clear and that alignment characteristics have been set.
+		if (struct.isZeroLength()) {
+			return;
 		}
-		else {
-			structLength = struct.getLength();
-			numComponents = structLength;
-		}
+
+		structLength = struct.getLength();
+		numComponents = structLength;
+
 		DataTypeComponent[] otherComponents = struct.getDefinedComponents();
 		for (int i = 0; i < otherComponents.length; i++) {
 			DataTypeComponent dtc = otherComponents[i];
-			DataType dt = dtc.getDataType();
-			replaceAtOffset(dtc.getOffset(), dt, dtc.getLength(), dtc.getFieldName(),
-				dtc.getComment());
-		}
-		// ok now that all components have been laid down, see if we can make any of them bigger
-		// without affecting any offsets
-		for (int i = 0; i < components.size(); i++) {
-			DataTypeComponent dtc = components.get(i);
-			DataType dataType = dtc.getDataType();
-			if (dataType.getLength() > dtc.getLength()) {
-				int n = consumeBytesAfter(i, dataType.getLength() - dtc.getLength());
-				if (n > 0) {
-					shiftOffsets(i + 1, 0 - n, 0);
-				}
+			DataType dt = dtc.getDataType().clone(dataMgr);
+			checkAncestry(dt);
+
+			int length = dt.getLength();
+			if (length <= 0 || dtc.isBitFieldComponent()) {
+				length = dtc.getLength();
 			}
+			else {
+				// do not exceed available space
+				int maxOffset;
+				int nextIndex = i + 1;
+				if (nextIndex < otherComponents.length) {
+					maxOffset = otherComponents[nextIndex].getOffset();
+				}
+				else {
+					maxOffset = struct.getLength();
+				}
+				length = Math.min(length, maxOffset - dtc.getOffset());
+			}
+
+			components.add(new DataTypeComponentImpl(dt, this, length, dtc.getOrdinal(),
+				dtc.getOffset(), dtc.getFieldName(), dtc.getComment()));
 		}
-		DataTypeComponent flexComponent = struct.getFlexibleArrayComponent();
-		if (flexComponent != null) {
-			setFlexibleArrayComponent(flexComponent.getDataType(), flexComponent.getFieldName(),
-				flexComponent.getComment());
-		}
-		setDataAlignmentInfo(struct);
+		repack(false);
 	}
 
 	@Override
 	public void dataTypeDeleted(DataType dt) {
+		boolean changed = false;
+		if (flexibleArrayComponent != null && flexibleArrayComponent.getDataType() == dt) {
+			flexibleArrayComponent.getDataType().removeParent(this);
+			flexibleArrayComponent = null;
+			changed = true;
+		}
 		int n = components.size();
 		for (int i = n - 1; i >= 0; i--) {
 			DataTypeComponentImpl dtc = components.get(i);
-			if (dtc.getDataType() == dt) {
+			boolean removeBitFieldComponent = false;
+			if (dtc.isBitFieldComponent()) {
+				BitFieldDataType bitfieldDt = (BitFieldDataType) dtc.getDataType();
+				removeBitFieldComponent = bitfieldDt.getBaseDataType() == dt;
+			}
+			if (removeBitFieldComponent || dtc.getDataType() == dt) {
 				dt.removeParent(this);
+// FIXME: Consider replacing with undefined type instead of removing (don't remove bitfield)
 				components.remove(i);
 				shiftOffsets(i, dtc.getLength() - 1, 0);
+				--numComponents; // may be revised by repack
+				changed = true;
 			}
 		}
-		adjustInternalAlignment();
+		if (changed) {
+			repack(true);
+		}
 	}
 
 	@Override
-	public void dataTypeReplaced(DataType oldDt, DataType newDt) {
+	public void dataTypeReplaced(DataType oldDt, DataType replacementDt)
+			throws IllegalArgumentException {
+		DataType newDt = replacementDt;
 		try {
-			validateDataType(newDt);
-			checkAncestry(newDt);
+			validateDataType(replacementDt);
+			if (replacementDt.getDataTypeManager() != dataMgr) {
+				replacementDt = replacementDt.clone(dataMgr);
+			}
+			checkAncestry(replacementDt);
 		}
 		catch (Exception e) {
-			newDt = DataType.DEFAULT;
+			// TODO: should we use Undefined1 instead to avoid cases where
+			// DEFAULT datatype can not be used (flex array, bitfield, aligned structure)
+			// TODO: failing silently is rather hidden
+			replacementDt = DataType.DEFAULT;
 		}
 
 		boolean changed = false;
-		int nextIndex = 0; // index of next defined component.
-		Iterator<DataTypeComponentImpl> it = components.iterator();
-		while (it.hasNext()) {
-			nextIndex++;
-			DataTypeComponentImpl comp = it.next();
-			DataType compDt = comp.getDataType();
-			if (oldDt == compDt) {
-				oldDt.removeParent(this);
-				comp.setDataType(newDt);
-				newDt.addParent(this);
-				int len = newDt.getLength();
-				int oldLen = comp.getLength();
-				if (len > 0) {
-					if (len < oldLen) {
-						comp.setLength(len);
-						shiftOffsets(nextIndex, oldLen - len, 0);
-					}
-					else if (len > oldLen) {
-						int bytesAvailable = getNumUndefinedBytes(comp.getOrdinal() + 1);
-						int bytesNeeded = len - oldLen;
-						if (bytesNeeded <= bytesAvailable) {
-							comp.setLength(len);
-							shiftOffsets(nextIndex, -bytesNeeded, 0);
-						}
-						else if (comp.getOrdinal() == getLastDefinedComponentIndex()) { // we are the last defined component, grow structure
-							doGrowStructure(bytesNeeded - bytesAvailable);
-							comp.setLength(len);
-							shiftOffsets(nextIndex, -bytesNeeded, 0);
-						}
-						else {
-							comp.setLength(oldLen + bytesAvailable);
-							shiftOffsets(nextIndex, -bytesAvailable, 0);
-						}
-					}
+		if (flexibleArrayComponent != null && flexibleArrayComponent.getDataType() == oldDt) {
+			flexibleArrayComponent.getDataType().removeParent(this);
+			if (isInvalidFlexArrayDataType(replacementDt)) {
+				flexibleArrayComponent = null;
+				Msg.error(this, "Invalid flex array replacement type " + newDt.getName() +
+					", removing flex array: " + getPathName());
+			}
+			else {
+				flexibleArrayComponent.setDataType(replacementDt);
+				replacementDt.addParent(this);
+			}
+			changed = true;
+		}
+
+		for (int i = components.size() - 1; i >= 0; i--) {
+
+			DataTypeComponentImpl comp = components.get(i);
+			int nextIndex = i + 1;
+
+			boolean remove = false;
+			if (comp.isBitFieldComponent()) {
+				try {
+					changed |= updateBitFieldDataType(comp, oldDt, replacementDt);
 				}
+				catch (InvalidDataTypeException e) {
+					Msg.error(this,
+						"Invalid bitfield replacement type " + newDt.getName() +
+							", removing bitfield " + comp.getDataType().getName() + ": " +
+							getPathName());
+					remove = true;
+				}
+			}
+			else if (comp.getDataType() == oldDt) {
+				if (replacementDt == DEFAULT && isPackingEnabled()) {
+					Msg.error(this,
+						"Invalid replacement type " + newDt.getName() + ", removing component " +
+							comp.getDataType().getName() + ": " + getPathName());
+					remove = true;
+				}
+				else {
+					setComponentDataType(comp, replacementDt, nextIndex);
+					changed = true;
+				}
+			}
+			if (remove) {
+				// error case - remove component
+				oldDt.removeParent(this);
+				components.remove(i);
+				shiftOffsets(i, comp.getLength() - 1, 0); // ordinals only
 				changed = true;
 			}
 		}
 
-		adjustInternalAlignment();
 		if (changed) {
+			repack(false);
 			notifySizeChanged();
+		}
+	}
+
+	private void setComponentDataType(DataTypeComponentImpl comp, DataType newDt, int nextIndex) {
+
+		int oldLen = comp.getLength();
+		int len = newDt.getLength();
+		if (len < 1) {
+			len = oldLen;
+		}
+
+		comp.getDataType().removeParent(this);
+		comp.setDataType(newDt);
+		newDt.addParent(this);
+
+		if (isPackingEnabled()) {
+			comp.setLength(len);
+			return;
+		}
+
+		if (len < oldLen) {
+			comp.setLength(len);
+			shiftOffsets(nextIndex, oldLen - len, 0);
+		}
+		else if (len > oldLen) {
+			int bytesAvailable = getNumUndefinedBytes(comp.getOrdinal() + 1);
+			int bytesNeeded = len - oldLen;
+			if (bytesNeeded <= bytesAvailable) {
+				comp.setLength(len);
+				shiftOffsets(nextIndex, -bytesNeeded, 0);
+			}
+			else if (comp.getOrdinal() == getLastDefinedComponentIndex()) { // we are the last defined component, grow structure
+				doGrowStructure(bytesNeeded - bytesAvailable);
+				comp.setLength(len);
+				shiftOffsets(nextIndex, -bytesNeeded, 0);
+			}
+			else {
+				comp.setLength(oldLen + bytesAvailable);
+				shiftOffsets(nextIndex, -bytesAvailable, 0);
+			}
 		}
 	}
 
@@ -759,78 +1302,112 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 
 	@Override
 	public DataTypeComponent replace(int index, DataType dataType, int length, String componentName,
-			String comment) {
+			String comment) throws IndexOutOfBoundsException, IllegalArgumentException {
 		if (index < 0 || index >= numComponents) {
-			throw new ArrayIndexOutOfBoundsException(index);
+			throw new IndexOutOfBoundsException(index);
 		}
-		validateDataType(dataType);
-		checkAncestry(dataType);
-		dataType = dataType.clone(getDataTypeManager());
+
+		dataType = validateDataType(dataType);
 
 		DataTypeComponentImpl origDtc = (DataTypeComponentImpl) getComponent(index);
-		DataTypeComponent replacement = replace(origDtc, dataType, length, componentName, comment);
-		adjustInternalAlignment();
+		if (origDtc.isBitFieldComponent()) {
+			throw new IllegalArgumentException("Bit-field component may not be directly replaced");
+		}
+
+		if (dataType == DataType.DEFAULT) {
+			clearComponent(index);
+			return getComponent(index);
+		}
+
+		dataType = dataType.clone(dataMgr);
+		checkAncestry(dataType);
+
+		length = getPreferredComponentLength(dataType, length);
+
+		DataTypeComponent replacement =
+			replaceComponent(origDtc, dataType, length, componentName, comment);
+		repack(false);
+		notifySizeChanged();
 		return replacement;
 	}
 
 	@Override
-	public DataTypeComponent replace(int index, DataType dataType, int length) {
+	public final DataTypeComponent replace(int index, DataType dataType, int length) {
 		return replace(index, dataType, length, null, null);
 	}
 
 	@Override
 	public DataTypeComponent replaceAtOffset(int offset, DataType dataType, int length,
-			String componentName, String comment) {
+			String componentName, String comment) throws IllegalArgumentException {
 		if (offset < 0) {
 			throw new IllegalArgumentException("Offset cannot be negative.");
 		}
 		if (offset >= structLength) {
+			if (!isPackingEnabled() && offset < getLength()) {
+				return insertAtOffset(offset, dataType, length, componentName, comment);
+			}
 			throw new IllegalArgumentException(
-				"Offset " + offset + " is beyond end of structure (" + structLength + ").");
+				"Offset " + offset + " is beyond end of structure (" + getLength() + ").");
 		}
-		validateDataType(dataType);
-		checkAncestry(dataType);
-		dataType = dataType.clone(getDataTypeManager());
+
+		dataType = validateDataType(dataType);
+
 		DataTypeComponentImpl origDtc = (DataTypeComponentImpl) getComponentAt(offset);
-		DataTypeComponent replacement = replace(origDtc, dataType, length, componentName, comment);
-		adjustInternalAlignment();
+		if (origDtc.isBitFieldComponent()) {
+			throw new IllegalArgumentException("Bit-field component may not be directly replaced");
+		}
+
+		if (dataType == DataType.DEFAULT) {
+			int ordinal = origDtc.getOrdinal();
+			clearComponent(ordinal);
+			return getComponent(ordinal);
+		}
+
+		dataType = dataType.clone(dataMgr);
+		checkAncestry(dataType);
+
+		length = getPreferredComponentLength(dataType, length);
+
+		DataTypeComponent replacement =
+			replaceComponent(origDtc, dataType, length, componentName, comment);
+
+		repack(false);
+		notifySizeChanged();
 		return replacement;
 	}
 
 	/**
-	 * Replace the indicated component with a new component containing the 
-	 * specified data type.
+	 * Replace the indicated component with a new component containing the specified data type.
+	 * 
 	 * @param origDtc the original data type component in this structure.
 	 * @param dataType the data type of the new component
 	 * @param length the length of the new component
 	 * @param componentName the field name of the new component
-	 * @param comment the commewnt for the new component
+	 * @param comment the comment for the new component
 	 * @return the new component or null if the new component couldn't fit.
-	 * @throws IllegalArgumentException if the dataType.getLength() is positive 
-	 * and does not match the given length parameter.
-	 * @throws IllegalArgumentException if the specified data type is not 
-	 * allowed to replace a component in this composite data type.
-	 * For example, suppose dt1 contains dt2. Therefore it is not valid
-	 * to replace a dt2 component with dt1 since this would cause a cyclic 
-	 * dependency.
+	 * @throws IllegalArgumentException if the specified data type is not allowed to replace a
+	 *             component in this composite data type. For example, suppose dt1 contains dt2.
+	 *             Therefore it is not valid to replace a dt2 component with dt1 since this would
+	 *             cause a cyclic dependency. In addition, any attempt to replace an existing
+	 *             bit-field component or specify a {@link BitFieldDataType} will produce this
+	 *             error.
 	 */
-	private DataTypeComponent replace(DataTypeComponentImpl origDtc, DataType dataType, int length,
-			String componentName, String comment) {
+	private DataTypeComponent replaceComponent(DataTypeComponentImpl origDtc, DataType dataType,
+			int length, String componentName, String comment) {
+
+// FIXME: Unsure how o support replace operation with bit-fields.  Within non-packed structure 
+// the packing behavior for bit-fields prevents a one-for-one replacement and things may shift
+// around which the non-packed structure tries to avoid.  Insert and delete are less of a concern
+// since movement already can occur, although insert at offset may not retain the offset if it 
+// interacts with bit-fields.
 
 		int ordinal = origDtc.getOrdinal();
 		int newOffset = origDtc.getOffset();
 		int dtcLength = origDtc.getLength();
 
-		// TODO Is this the right place to adjust the length?
-		int dtLength = dataType.getLength();
-		if (dtLength > 0 && dtLength < length) {
-			length = dtLength;
-		}
-
-		origDtc.getDataType().removeParent(this);
 		DataTypeComponentImpl newDtc = new DataTypeComponentImpl(dataType, this, length, ordinal,
 			newOffset, componentName, comment);
-		dataType.addParent(this);
+
 		int bytesNeeded = length - dtcLength;
 		int deltaOrdinal = -bytesNeeded;
 		if (bytesNeeded > 0) {
@@ -847,14 +1424,18 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 				}
 			}
 		}
-		int index = Collections.binarySearch(components, new Integer(ordinal), ordinalComparator);
+		int index =
+			Collections.binarySearch(components, Integer.valueOf(ordinal),
+				OrdinalComparator.INSTANCE);
 		if (index < 0) {
 			index = -index - 1;
 		}
 		else {
 			components.remove(index);
+			origDtc.getDataType().removeParent(this);
 		}
 		components.add(index, newDtc);
+		dataType.addParent(this);
 		if (deltaOrdinal != 0) {
 			shiftOffsets(index + 1, deltaOrdinal, 0);
 		}
@@ -870,9 +1451,9 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 	}
 
 	/**
-	 * Gets the number of Undefined bytes beginning at the indicated component 
-	 * index. Undefined bytes that have a field name or comment specified are 
-	 * also included.
+	 * Gets the number of Undefined bytes beginning at the indicated component index. Undefined
+	 * bytes that have a field name or comment specified are also included.
+	 * 
 	 * @param index the component index to begin checking at.
 	 * @return the number of contiguous undefined bytes
 	 */
@@ -880,7 +1461,8 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 		if (index >= numComponents) {
 			return 0;
 		}
-		int idx = Collections.binarySearch(components, new Integer(index), ordinalComparator);
+		int idx = Collections.binarySearch(components, Integer.valueOf(index),
+			OrdinalComparator.INSTANCE);
 		DataTypeComponent dtc = null;
 		if (idx < 0) {
 			idx = -idx - 1;
@@ -895,25 +1477,19 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 	}
 
 	@Override
-	public void dataTypeNameChanged(DataType dt, String oldName) {
-	}
-
-	@Override
 	public boolean dependsOn(DataType dt) {
 		return false;
 	}
 
 	@Override
 	public void deleteAll() {
-		for (int i = 0; i < components.size(); i++) {
-			DataTypeComponent dtc = components.get(i);
+		for (DataTypeComponentImpl dtc : components) {
 			dtc.getDataType().removeParent(this);
 		}
 		components.clear();
 		structLength = 0;
 		numComponents = 0;
 		flexibleArrayComponent = null;
-		adjustInternalAlignment();
 		notifySizeChanged();
 	}
 
@@ -923,203 +1499,77 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 	}
 
 	@Override
-	public void realign() {
-		adjustInternalAlignment();
-	}
-
-	@Override
-	public void pack(int packingSize) throws InvalidInputException {
-		setPackingValue(packingSize);
-	}
-
-	/**
-	 * Adjust the alignment, packing and padding of components within this structure based upon the 
-	 * current alignment and packing attributes for this structure. This method should be 
-	 * called to basically fix up the layout of the internal components of the structure 
-	 * after other code has changed the attributes of the structure.
-	 * <BR>When switching between internally aligned and unaligned this method corrects the 
-	 * component ordinal numbering also.
-	 * @return true if the structure was changed by this method.
-	 */
-	protected boolean adjustComponents() {
-		boolean internallyAligned = isInternallyAligned();
-		boolean keepDefinedDefaults = !internallyAligned;
+	public boolean repack(boolean notify) {
 
 		int oldLength = structLength;
+		int oldAlignment = getAlignment();
 
-		if (!isInternallyAligned()) {
-			boolean changed = adjustUnalignedComponents();
-			if (changed) {
-				if (oldLength != structLength) {
-					notifySizeChanged();
-				}
-			}
-			return changed;
+		boolean changed;
+		if (!isPackingEnabled()) {
+			changed = adjustNonPackedComponents();
+		}
+		else {
+			StructurePackResult packResult =
+				AlignedStructurePacker.packComponents(this, components);
+			changed = packResult.componentsChanged;
+			changed |= (structLength != packResult.structureLength) ||
+				(structAlignment != packResult.alignment) ||
+					(numComponents != packResult.numComponents);
+			structLength = packResult.structureLength;
+			structAlignment = packResult.alignment;
+			numComponents = components.size();
 		}
 
-		boolean compositeDBChanged = false;
-		boolean componentsDBChanged = false;
-		int packingAlignment = getPackingValue();
-
-		// Adjust each of the components.
-		int currentOrdinal = 0;
-		int currentOffset = 0;
-		int allComponentsLCM = 1;
-		for (DataTypeComponentImpl dataTypeComponent : components) {
-
-			DataType componentDt = dataTypeComponent.getDataType();
-			if (!keepDefinedDefaults && DataType.DEFAULT == componentDt) {
-				continue; // Discard a defined Default data type.
-			}
-			int componentLength = dataTypeComponent.getLength();
-			int componentOrdinal = dataTypeComponent.getOrdinal();
-			int componentOffset = dataTypeComponent.getOffset();
-			int dtLength = componentDt.getLength();
-			if (dtLength <= 0) {
-				dtLength = componentLength;
-			}
-
-			int componentAlignment = getPackedAlignment(componentDt, dtLength, packingAlignment);
-
-			allComponentsLCM =
-				DataOrganizationImpl.getLeastCommonMultiple(allComponentsLCM, componentAlignment);
-
-			int newOffset = DataOrganizationImpl.getOffset(componentAlignment, currentOffset);
-			currentOffset = newOffset + dtLength;
-			if (componentOrdinal == currentOrdinal && componentOffset == newOffset &&
-				componentLength == dtLength) {
-				currentOrdinal++;
-				continue; // No change needed.
-			}
-			dataTypeComponent.setOffset(newOffset);
-			dataTypeComponent.setOrdinal(currentOrdinal);
-			dataTypeComponent.setLength(dtLength);
-			currentOrdinal++;
-			componentsDBChanged = true;
-		}
-
-		if (flexibleArrayComponent != null) {
-			// account for flexible array type in any end of structure padding
-			DataType dataType = flexibleArrayComponent.getDataType();
-			int componentAlignment =
-				getPackedAlignment(dataType, dataType.getLength(), packingAlignment);
-			currentOffset = DataOrganizationImpl.getOffset(componentAlignment, currentOffset);
-			allComponentsLCM =
-				DataOrganizationImpl.getLeastCommonMultiple(allComponentsLCM, componentAlignment);
-		}
-
-		// Adjust the structure
-		compositeDBChanged = updateComposite(currentOrdinal, currentOffset);
-
-		boolean addedPadding = alignEndOfStruct(allComponentsLCM);
-
-		if (componentsDBChanged || compositeDBChanged || addedPadding) {
+		if (changed && notify) {
 			if (oldLength != structLength) {
 				notifySizeChanged();
 			}
-			return true;
-		}
-		return false;
-	}
-
-	private int getPackedAlignment(DataType componentDt, int dtLength, int packingAlignment) {
-		DataOrganization dataOrganization = getDataOrganization();
-		int componentAlignment = dataOrganization.getAlignment(componentDt, dtLength);
-		int componentForcedAlignment = dataOrganization.getForcedAlignment(componentDt);
-		boolean componentForcingAlignment = componentForcedAlignment > 0;
-		if (componentForcingAlignment) {
-			componentAlignment = DataOrganizationImpl.getLeastCommonMultiple(componentAlignment,
-				componentForcedAlignment);
-		}
-		if (packingAlignment > 0) {
-			if (componentForcedAlignment > packingAlignment) {
-				componentAlignment = componentForcedAlignment;
-			}
-			else if (componentAlignment > packingAlignment) {
-				componentAlignment = packingAlignment;
+			else if (oldAlignment != structAlignment) {
+				notifyAlignmentChanged();
 			}
 		}
-		return componentAlignment;
+		return changed;
 	}
 
-	private boolean adjustUnalignedComponents() {
+	private boolean adjustNonPackedComponents() {
 		boolean changed = false;
-		int currentOrdinal = 0;
 		int componentCount = 0;
 		int currentOffset = 0;
 		for (DataTypeComponentImpl dataTypeComponent : components) {
 			int componentLength = dataTypeComponent.getLength();
 			int componentOffset = dataTypeComponent.getOffset();
 			int numUndefinedsBefore = componentOffset - currentOffset;
-			componentCount += numUndefinedsBefore;
-			currentOffset += numUndefinedsBefore;
-			currentOrdinal += numUndefinedsBefore;
-			componentCount++;
-			currentOffset += componentLength;
-			if (dataTypeComponent.getOrdinal() != currentOrdinal) {
-				dataTypeComponent.setOrdinal(currentOrdinal);
+			if (numUndefinedsBefore > 0) {
+				componentCount += numUndefinedsBefore;
+			}
+			currentOffset = componentOffset + componentLength;
+			if (dataTypeComponent.getOrdinal() != componentCount) {
+				dataTypeComponent.setOrdinal(componentCount);
 				changed = true;
 			}
-			currentOrdinal++;
+			componentCount++;
 		}
+
 		int numUndefinedsAfter = structLength - currentOffset;
 		componentCount += numUndefinedsAfter;
-		if (updateNumComponents(componentCount)) {
+		if (numComponents != componentCount) {
+			numComponents = componentCount;
+			changed = true;
+		}
+		int alignment = getNonPackedAlignment();
+		if (alignment != structAlignment) {
+			structAlignment = alignment;
 			changed = true;
 		}
 		return changed;
 	}
 
-	private boolean updateNumComponents(int currentNumComponents) {
-		if (numComponents != currentNumComponents) {
-			numComponents = currentNumComponents;
-			return true;
-		}
-		return false;
-	}
-
-	private boolean updateComposite(int currentNumComponents, int currentLength) {
-		boolean compositeChanged = false;
-		if (numComponents != currentNumComponents) {
-			numComponents = currentNumComponents;
-			compositeChanged = true;
-		}
-		if (structLength != currentLength) {
-			structLength = currentLength;
-			compositeChanged = true;
-		}
-		return compositeChanged;
-	}
-
-	private boolean alignEndOfStruct(int componentLCM) {
-		int minimumAlignment = getMinimumAlignment();
-		int structureLength = getLength();
-		if (structureLength == 0) {
-			return true;
-		}
-		int overallAlignment = componentLCM;
-		if (minimumAlignment > overallAlignment) {
-			// TODO Should this actually get the LeastCommonMultiple of minimumAlignment and overallAlignment?
-			overallAlignment = minimumAlignment;
-		}
-		int padSize = DataOrganizationImpl.getPaddingSize(overallAlignment, structLength);
-		if (padSize > 0) {
-			doGrowStructure(padSize);
-			return true;
-		}
-		return false;
-	}
-
 	private void doGrowStructure(int amount) {
-		if (!isInternallyAligned()) {
-			numComponents += amount;
+		if (isPackingEnabled()) {
+			throw new AssertException("only valid for non-packed");
 		}
+		numComponents += amount;
 		structLength += amount;
-	}
-
-	@Override
-	public void adjustInternalAlignment() {
-		adjustComponents();
 	}
 
 	@Override
@@ -1132,10 +1582,23 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 		return flexibleArrayComponent;
 	}
 
+	private boolean isInvalidFlexArrayDataType(DataType dataType) {
+		return (dataType == null || dataType == DataType.DEFAULT ||
+			dataType instanceof BitFieldDataType || dataType instanceof Dynamic ||
+			dataType instanceof FactoryDataType);
+	}
+
 	@Override
 	public DataTypeComponent setFlexibleArrayComponent(DataType flexType, String name,
 			String comment) {
-		return doAdd(flexType, 0, name, comment, true, true);
+		if (isInvalidFlexArrayDataType(flexType)) {
+			throw new IllegalArgumentException(
+				"Unsupported flexType: " + flexType.getDisplayName());
+		}
+		DataTypeComponent dtc = doAdd(flexType, 0, true, name, comment, false);
+		repack(false);
+		notifySizeChanged();
+		return dtc;
 	}
 
 	@Override
@@ -1144,65 +1607,8 @@ public class StructureDataType extends CompositeDataTypeImpl implements Structur
 			return;
 		}
 		flexibleArrayComponent = null;
-		adjustInternalAlignment();
+		repack(false);
 		notifySizeChanged();
-	}
-
-	@Override
-	protected void dumpComponents(StringBuilder buffer, String pad) {
-		super.dumpComponents(buffer, pad);
-		DataTypeComponent dtc = getFlexibleArrayComponent();
-		if (dtc != null) {
-			DataType dataType = dtc.getDataType();
-			buffer.append(pad + dataType.getDisplayName() + "[0]");
-			buffer.append(pad + dtc.getLength());
-			buffer.append(pad + dtc.getFieldName());
-			String comment = dtc.getComment();
-			if (comment == null) {
-				comment = "";
-			}
-			buffer.append(pad + "\"" + comment + "\"");
-			buffer.append("\n");
-		}
-	}
-}
-
-class OffsetComparator implements Comparator<Object> {
-
-	/**
-	 * @see java.util.Comparator#compare(java.lang.Object, java.lang.Object)
-	 */
-	@Override
-	public int compare(Object o1, Object o2) {
-		if (o1 instanceof Integer) {
-			return -compare(o2, o1);
-		}
-		DataTypeComponent dtc = (DataTypeComponent) o1;
-		int offset = ((Integer) o2).intValue();
-		if (offset < dtc.getOffset()) {
-			return 1;
-		}
-		else if (offset > dtc.getEndOffset()) {
-			return -1;
-		}
-		return 0;
-	}
-
-}
-
-class OrdinalComparator implements Comparator<Object> {
-
-	/**
-	 * @see java.util.Comparator#compare(java.lang.Object, java.lang.Object)
-	 */
-	@Override
-	public int compare(Object o1, Object o2) {
-		if (o1 instanceof Integer) {
-			return -compare(o2, o1);
-		}
-		DataTypeComponent dtc = (DataTypeComponent) o1;
-		int ordinal = ((Integer) o2).intValue();
-		return dtc.getOrdinal() - ordinal;
 	}
 
 }

@@ -1,6 +1,5 @@
 /* ###
  * IP: GHIDRA
- * REVIEWED: YES
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,22 +15,21 @@
  */
 package ghidra.app.plugin.core.datamgr;
 
-import ghidra.app.context.ProgramActionContext;
-import ghidra.app.plugin.core.datamgr.archive.ProjectArchive;
-import ghidra.app.plugin.core.datamgr.tree.DataTypeArchiveGTree;
-import ghidra.app.plugin.core.datamgr.tree.ProjectArchiveNode;
-import ghidra.framework.main.datatable.DomainFileProvider;
-import ghidra.framework.model.DomainFile;
-import ghidra.program.model.listing.Program;
-
 import java.util.ArrayList;
 import java.util.List;
 
 import javax.swing.tree.TreePath;
 
 import docking.widgets.tree.GTreeNode;
+import ghidra.app.context.ProgramActionContext;
+import ghidra.app.plugin.core.datamgr.archive.ProjectArchive;
+import ghidra.app.plugin.core.datamgr.tree.DataTypeArchiveGTree;
+import ghidra.app.plugin.core.datamgr.tree.ProjectArchiveNode;
+import ghidra.framework.main.datatable.DomainFileContext;
+import ghidra.framework.model.DomainFile;
+import ghidra.program.model.listing.Program;
 
-public class DataTypesActionContext extends ProgramActionContext implements DomainFileProvider {
+public class DataTypesActionContext extends ProgramActionContext implements DomainFileContext {
 	private final GTreeNode clickedNode;
 	private final boolean isToolbarAction;
 	private DataTypeArchiveGTree archiveGTree;
@@ -44,6 +42,7 @@ public class DataTypesActionContext extends ProgramActionContext implements Doma
 
 	public DataTypesActionContext(DataTypesProvider provider, Program program,
 			DataTypeArchiveGTree archiveGTree, GTreeNode clickedNode, boolean isToolbarAction) {
+
 		super(provider, program, archiveGTree);
 		this.archiveGTree = archiveGTree;
 		this.clickedNode = clickedNode;

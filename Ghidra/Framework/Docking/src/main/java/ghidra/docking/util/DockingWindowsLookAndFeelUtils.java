@@ -115,8 +115,8 @@ public class DockingWindowsLookAndFeelUtils {
 	/**
 	 * Set the look and feel (LAF) indicated by the string passed in as a parameter.  
 	 * The string value can be either the class name of the LAF, as returned by 
-	 * <tt>LookAndFeelInfo.getClassName()</tt> or the name as returned by 
-	 * <tt>LookAndFeelInfo.getName()</tt>.
+	 * <code>LookAndFeelInfo.getClassName()</code> or the name as returned by 
+	 * <code>LookAndFeelInfo.getName()</code>.
 	 * <p>
 	 * Note: to be effective, this call needs to be made before any components have been created
 	 * and shown.
@@ -206,8 +206,10 @@ public class DockingWindowsLookAndFeelUtils {
 			case NIMBUS_LOOK_AND_FEEL:
 				// fix scroll bar grabber disappearing.  See https://bugs.openjdk.java.net/browse/JDK-8134828
 				// This fix looks like it should not cause harm even if the bug is fixed on the jdk side.
-				UIDefaults defaults = lookAndFeel.getDefaults();
+				UIDefaults defaults = UIManager.getDefaults();
 				defaults.put("ScrollBar.minimumThumbSize", new Dimension(30, 30));
+
+				// (see NimbusDefaults for key values that can be changed here)
 				break;
 		}
 	}
@@ -277,8 +279,7 @@ public class DockingWindowsLookAndFeelUtils {
 
 	/** Allows you to globally set the font size (don't use this method!) */
 	private static void setGlobalFontSizeOverride(int fontSize) {
-		LookAndFeel lookAndFeel = UIManager.getLookAndFeel();
-		UIDefaults defaults = lookAndFeel.getDefaults();
+		UIDefaults defaults = UIManager.getDefaults();
 
 		Set<Entry<Object, Object>> set = defaults.entrySet();
 		Iterator<Entry<Object, Object>> iterator = set.iterator();
@@ -310,6 +311,7 @@ public class DockingWindowsLookAndFeelUtils {
 	/**
 	 * Returns true if the given UI object is using the Aqua Look and Feel.  
 	 * @param UI the UI to examine.
+	 * @return true if the UI is using Aqua
 	 */
 	public static boolean isUsingAquaUI(ComponentUI UI) {
 		Class<? extends ComponentUI> clazz = UI.getClass();
@@ -317,4 +319,12 @@ public class DockingWindowsLookAndFeelUtils {
 		return name.startsWith("Aqua");
 	}
 
+	/**
+	 * Returns true if 'Nimbus' is the current Look and Feel  
+	 * @return true if 'Nimbus' is the current Look and Feel
+	 */
+	public static boolean isUsingNimbusUI() {
+		LookAndFeel lookAndFeel = UIManager.getLookAndFeel();
+		return NIMBUS_LOOK_AND_FEEL.equals(lookAndFeel.getName());
+	}
 }

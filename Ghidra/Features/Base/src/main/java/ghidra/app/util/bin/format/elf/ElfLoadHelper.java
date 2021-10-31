@@ -15,13 +15,13 @@
  */
 package ghidra.app.util.bin.format.elf;
 
-import ghidra.app.util.MemoryBlockUtil;
 import ghidra.app.util.bin.format.MemoryLoadable;
 import ghidra.app.util.importer.MessageLog;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressRange;
 import ghidra.program.model.data.DataType;
 import ghidra.program.model.listing.*;
+import ghidra.program.model.mem.MemoryAccessException;
 import ghidra.program.model.symbol.Namespace;
 import ghidra.program.model.symbol.Symbol;
 import ghidra.util.exception.InvalidInputException;
@@ -43,12 +43,6 @@ public interface ElfLoadHelper {
 	 * @return ELF Header object
 	 */
 	ElfHeader getElfHeader();
-
-	/**
-	 * Memory block utility (program memory may be accessed directly if preferred)
-	 * @return memory block utility associated with program load
-	 */
-	MemoryBlockUtil getMemoryBlockUtil();
 
 	/**
 	 * Get the message log
@@ -81,15 +75,14 @@ public interface ElfLoadHelper {
 	 * @param name name of function or null for default (or label already applied)
 	 * @param address address of function
 	 * @param isEntry mark function as entry point if true
-	 * @param log
 	 * @return new or existing function.
 	 */
 	Function createOneByteFunction(String name, Address address, boolean isEntry);
 
 	/**
 	 * Create an external function within the UNKNOWN space and a corresponding thunk at 
-	 * the internalFunctionAddr.  If the functionAddr and/or indirectPointerAddr has a symbol with <name>
-	 * it will be removed so as not to replicate the external function name.
+	 * the internalFunctionAddr.  If the functionAddr and/or indirectPointerAddr has a symbol with
+	 * {@code <name>} it will be removed so as not to replicate the external function name.
 	 * @param name external function name
 	 * @param functionAddr location of thunk function (memory address only)
 	 * @param indirectPointerAddr if not null a pointer to functionAddr will be written (size of pointer
@@ -153,7 +146,7 @@ public interface ElfLoadHelper {
 	/**
 	 * Get the program address for an addressableWordOffset within the default address space.  
 	 * This method is responsible for applying any program image base change imposed during 
-	 * the import (see {@link #getImageBaseWordOffset(Program, ElfHeader)}.
+	 * the import (see {@link #getImageBaseWordAdjustmentOffset()}.
 	 * @param addressableWordOffset absolute word offset.  The offset should already include
 	 * default image base and pre-link adjustment (see {@link ElfHeader#adjustAddressForPrelink(long)}).  
 	 * @return memory address in default code space
@@ -164,7 +157,7 @@ public interface ElfLoadHelper {
 	 * Get the program image base offset adjustment.  The value returned reflects the
 	 * actual program image base minus the default image base (see {@link ElfHeader#getImageBase()}.
 	 * This will generally be zero (0), unless the program image base differs from the
-	 * default.  It may be neccessary to add this value to any pre-linked address values
+	 * default.  It may be necessary to add this value to any pre-linked address values
 	 * such as those contained with the dynamic table. (Applies to default address space only)
 	 * @return image base adjustment value
 	 */
@@ -190,10 +183,24 @@ public interface ElfLoadHelper {
 	 * small 16-bit default memory space, or when shared memory regions exist.
 	 * </p>
 	 * @param alignment required byte alignment of allocated range
-	 * @param size size of requested allocation (size <= 0 reserved for EXTERNAL block)
+	 * @param size size of requested allocation (size &lt;= 0 reserved for EXTERNAL block)
 	 * @param purpose brief descriptive purpose of range.
 	 * @return address range or null if no unallocated range found
 	 */
 	public AddressRange allocateLinkageBlock(int alignment, int size, String purpose);
+
+	/**
+	 * <p>Get the original memory value at the specified address if a relocation was applied at the
+	 * specified address (not containing).  Current memory value will be returned if no relocation
+	 * has been applied at specified address.  The value size is either 8-bytes if {@link ElfHeader#is64Bit()},
+	 * otherwise it will be 4-bytes.  This is primarily intended to inspect original bytes within 
+	 * the GOT which may have had relocations applied to them.
+	 * @param addr memory address
+	 * @param signExtend if true sign-extend to long, else treat as unsigned
+	 * @return original bytes value
+	 * @throws MemoryAccessException if memory read fails
+	 */
+	public long getOriginalValue(Address addr, boolean signExtend)
+			throws MemoryAccessException;
 
 }

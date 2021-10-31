@@ -17,6 +17,7 @@ package ghidra.app.plugin.core.byteviewer;
 
 import java.awt.event.*;
 import java.math.BigInteger;
+import java.util.List;
 import java.util.Set;
 
 import javax.swing.*;
@@ -70,9 +71,17 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	public ProgramByteViewerComponentProvider(PluginTool tool, ByteViewerPlugin plugin,
 			boolean isConnected) {
 		super(tool, plugin, "Bytes", ByteViewerActionContext.class);
-		this.isConnected = isConnected;
-		decorationComponent = new DecoratorPanel(panel, isConnected);
 
+		this.isConnected = isConnected;
+		setIcon(ResourceManager.loadImage("images/binaryData.gif"));
+		if (!isConnected) {
+			setTransient();
+		}
+		else {
+			addToToolbar();
+		}
+
+		decorationComponent = new DecoratorPanel(panel, isConnected);
 		clipboardProvider = new ByteViewerClipboardProvider(this, tool);
 		addToTool();
 
@@ -84,6 +93,12 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	public void createProgramActions() {
 		cloneByteViewerAction = new CloneByteViewerAction();
 		tool.addLocalAction(this, cloneByteViewerAction);
+	}
+
+	@Override
+	public boolean isSnapshot() {
+		// we are a snapshot when we are 'disconnected' 
+		return !isConnected();
 	}
 
 	@Override
@@ -131,11 +146,6 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	}
 
 	@Override
-	public boolean isTransient() {
-		return false;
-	}
-
-	@Override
 	public void setSelection(ProgramSelection selection) {
 		setSelection(selection, true);
 	}
@@ -148,6 +158,11 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	@Override
 	public ProgramSelection getHighlight() {
 		return currentHighlight;
+	}
+
+	@Override
+	public String getTextSelection() {
+		return getCurrentTextSelection();
 	}
 
 	private void setSelection(ProgramSelection selection, boolean notify) {
@@ -418,8 +433,7 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	}
 
 	/**
-	 * Called when the memory in the current program changes, from the domain
-	 * object listener.
+	 * Called when the memory in the current program changes, from the domain object listener.
 	 */
 	void memoryConfigurationChanged() {
 		ProgramLocation location = currentLocation;
@@ -503,7 +517,9 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	}
 
 	/**
-	 * Gets the text of the current {@link ProgramSelection}.
+	 * Gets the text of the current {@link ProgramSelection}
+	 * 
+	 * @return the text
 	 */
 	String getCurrentTextSelection() {
 		return panel.getCurrentComponent().getTextForSelection();
@@ -686,7 +702,7 @@ public class ProgramByteViewerComponentProvider extends ByteViewerComponentProvi
 	@Override
 	protected Set<DataFormatModel> getDataFormatModels() {
 		Set<DataFormatModel> dataFormatModels = super.getDataFormatModels();
-		Set<ProgramDataFormatModel> instances =
+		List<ProgramDataFormatModel> instances =
 			ClassSearcher.getInstances(ProgramDataFormatModel.class);
 		dataFormatModels.addAll(instances);
 		return dataFormatModels;

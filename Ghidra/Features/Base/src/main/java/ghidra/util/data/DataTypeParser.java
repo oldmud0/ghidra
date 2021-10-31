@@ -15,19 +15,24 @@
  */
 package ghidra.util.data;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.apache.commons.lang3.StringUtils;
 
 import ghidra.app.plugin.core.datamgr.util.DataTypeUtils;
-import ghidra.app.services.DataTypeManagerService;
+import ghidra.app.services.DataTypeQueryService;
 import ghidra.program.database.data.DataTypeUtilities;
 import ghidra.program.database.data.ProgramDataTypeManager;
 import ghidra.program.model.data.*;
+import ghidra.util.exception.AssertException;
+import ghidra.util.exception.CancelledException;
 
 public class DataTypeParser {
 
 	public enum AllowedDataTypes {
 		/**
-		 * All data-types are permitted
+		 * All data-types are permitted (excluding bitfields)
 		 */
 		ALL,
 		/**
@@ -39,25 +44,63 @@ public class DataTypeParser {
 		 */
 		SIZABLE_DYNAMIC,
 		/**
+		 * All fixed-length data-types, sizable Dynamic data-types.
+		 * In addition a bitfield specification may be specified (e.g., int:2) 
+		 * for use when defining structure and union components only
+		 * (see {@link ProxyBitFieldDataType}).  Parser must be properly constructed
+		 * with the intended {@link DataTypeParser#destinationDataTypeManager}.
+		 * If a bitfield is returned special handling is required.
+		 */
+		SIZABLE_DYNAMIC_AND_BITFIELD,
+		/**
 		 * Only Fixed-length data-types
 		 */
-		FIXED_LENGTH
+		FIXED_LENGTH,
+		/**
+		 * Only Fixed-length data types and string data types
+		 */
+		STRINGS_AND_FIXED_LENGTH,
+		/**
+		 * Only Enums, Integer types and those Typedefs based on them
+		 * for use as a bitfield base datatype
+		 */
+		BITFIELD_BASE_TYPE
+	}
+
+	/**
+	 * <code>ProxyBitFieldDataType</code> provides acts as a proxy bitfield
+	 * whose specification may be used when defining a structure or 
+	 * union bitfield.  This datatype may not be directly applied to a program. 
+	 */
+	private static class ProxyBitFieldDataType extends BitFieldDataType {
+		/**
+		 * Construct proxy bitfield datatype for use when defining 
+		 * a structure or union bitfield.
+		 * @param baseDataType a supported primitive integer data type or TypeDef to such a type.
+		 * A deep clone of this type will be performed using the specified dataMgr.
+		 * @param bitSize size of bit-field expressed as number of bits
+		 * @throws InvalidDataTypeException if specified baseDataType is not permitted
+		 */
+		private ProxyBitFieldDataType(DataType baseDataType, int bitSize)
+				throws InvalidDataTypeException {
+			super(baseDataType, bitSize);
+		}
 	}
 
 	private DataTypeManager sourceDataTypeManager;			// may be null
 	private DataTypeManager destinationDataTypeManager;		// may be null
-	private DataTypeManagerService dataTypeManagerService;	// may be null
+	private DataTypeQueryService dataTypeManagerService;	// may be null
 	private AllowedDataTypes allowedTypes;
 
 	/**
 	 * A constructor that does not use the source or destination data type managers.  In terms of
 	 * the source data type manager, this means that all data type managers will be used when
 	 * resolving data types.
-	 * 
-	 * @param dataTypeManagerService
-	 * @param allowedTypes
+	 *
+	 * @param dataTypeManagerService data-type manager tool service, or null
+	 * @param allowedTypes constrains which data-types may be parsed 
 	 */
-	public DataTypeParser(DataTypeManagerService dataTypeManagerService,
+	public DataTypeParser(DataTypeQueryService dataTypeManagerService,
 			AllowedDataTypes allowedTypes) {
 		this.dataTypeManagerService = dataTypeManagerService;
 		this.allowedTypes = allowedTypes;
@@ -69,12 +112,12 @@ public class DataTypeParser {
 	 * @param destinationDataTypeManager target data-type manager, or null
 	 * @param dataTypeManagerService data-type manager tool service, or null
 	 * @param allowedTypes constrains which data-types may be parsed
-	 * 
-	 * @see #DataTypeParser(DataTypeManagerService, AllowedDataTypes)
+	 *
+	 * @see #DataTypeParser(DataTypeQueryService, AllowedDataTypes)
 	 */
 	public DataTypeParser(DataTypeManager sourceDataTypeManager,
 			DataTypeManager destinationDataTypeManager,
-			DataTypeManagerService dataTypeManagerService, AllowedDataTypes allowedTypes) {
+			DataTypeQueryService dataTypeManagerService, AllowedDataTypes allowedTypes) {
 		this.sourceDataTypeManager = sourceDataTypeManager;
 		this.destinationDataTypeManager = destinationDataTypeManager;
 		this.dataTypeManagerService = dataTypeManagerService;
@@ -86,46 +129,57 @@ public class DataTypeParser {
 	 * @param dataTypeString a known data-type name followed by zero or more pointer/array decorations.
 	 * @return parsed data-type or null if not found
 	 * @throws InvalidDataTypeException if data-type string is invalid or length exceeds specified maxSize
+	 * @throws CancelledException parse cancelled through user interaction
 	 */
-	public DataType parse(String dataTypeString) throws InvalidDataTypeException {
+	public DataType parse(String dataTypeString)
+			throws InvalidDataTypeException, CancelledException {
 		return parse(dataTypeString, (CategoryPath) null);
 	}
 
 	/**
-	 * Parse a data-type string specification with category path.  If category is not null,
+	 * Parse a data type string specification with category path.  If category is not null,
 	 * the dataTypeManagerService will not be queried.
 	 * @param dataTypeString a known data-type name followed by zero or more pointer/array decorations.
 	 * @param category known path of data-type or null if unknown
 	 * @return parsed data-type or null if not found
-	 * @throws InvalidDataTypeException if data-type string is invalid or length exceeds specified maxSize
+	 * @throws InvalidDataTypeException if data type string is invalid or length exceeds specified 
+	 *         maxSize
+	 * @throws CancelledException parse cancelled through user interaction (only if parser 
+	 *         constructed with service)
 	 */
 	public DataType parse(String dataTypeString, CategoryPath category)
-			throws InvalidDataTypeException {
+			throws InvalidDataTypeException, CancelledException {
 		dataTypeString = dataTypeString.replaceAll("\\s+", " ").trim();
 		String dataTypeName = getBaseString(dataTypeString);
 		DataType namedDt = getNamedDataType(dataTypeName, category);
 		if (namedDt == null) {
-			throw new InvalidDataTypeException("valid data-type not specified");
+			throw new InvalidDataTypeException("Valid data-type not specified");
 		}
 		return parseDataTypeModifiers(namedDt, dataTypeString.substring(dataTypeName.length()));
 	}
 
 	/**
-	 * Parse a data-type string specification using the specified baseDatatype.
-	 * @param suggestedBaseDataType base data-type (may be null), this will be used as the base data-type if
-	 * its name matches the base name in the specified dataTypeString.
-	 * @param dataTypeString a base data-type followed by a sequence of zero or more pointer/array decorations to be applied.  
+	 * Parse a data type string specification using the specified baseDatatype.
+	 * 
+	 * @param suggestedBaseDataType base data type (may be null), this will be used as the base 
+	 *        data-type if its name matches the base name in the specified dataTypeString.
+	 * @param dataTypeString a base data-type followed by a sequence of zero or more pointer/array 
+	 *        decorations to be applied.
 	 * The string may start with the baseDataType's name.
 	 * @return parsed data-type or null if not found
-	 * @throws InvalidDataTypeException if data-type string is invalid or length exceeds specified maxSize
+	 * @throws InvalidDataTypeException if data-type string is invalid or length exceeds specified 
+	 *         maxSize
+	 * @throws CancelledException parse cancelled through user interaction (only if parser 
+	 *         constructed with service)
 	 */
 	public DataType parse(String dataTypeString, DataType suggestedBaseDataType)
-			throws InvalidDataTypeException {
+			throws InvalidDataTypeException, CancelledException {
 		dataTypeString = dataTypeString.replaceAll("\\s+", " ").trim();
 		String dataTypeName = getBaseString(dataTypeString);
-		if (dataTypeName == null || dataTypeName.length() == 0) {
+		if (StringUtils.isBlank(dataTypeName)) {
 			throw new InvalidDataTypeException("missing base data-type name");
 		}
+
 		DataType namedDt;
 		if (suggestedBaseDataType != null && dataTypeName.equals(suggestedBaseDataType.getName())) {
 			namedDt = suggestedBaseDataType;
@@ -144,59 +198,64 @@ public class DataTypeParser {
 	}
 
 	/**
-	 * Validate the specified data-type dt against the specified allowedTypes.
-	 * @param dt data-type
-	 * @param allowedTypes
+	 * Throws exception if the data type does not match the specified {@link AllowedDataTypes}.
+	 * 
+	 * @param dt {@link DataType} to check
+	 * @param allowedTypes {@link AllowedDataTypes enum} specifying what category of data types are ok
 	 * @throws InvalidDataTypeException if dt violates the specified allowedTypes
 	 */
-	public static void checkAllowableType(DataType dt, AllowedDataTypes allowedTypes)
+	public static void ensureIsAllowableType(DataType dt, AllowedDataTypes allowedTypes)
 			throws InvalidDataTypeException {
-		if (allowedTypes == AllowedDataTypes.DYNAMIC) {
-			if (dt instanceof FactoryDataType) {
-				throw new InvalidDataTypeException("factory data-type not allowed");
+		if (dt instanceof BitFieldDataType) {
+			if (allowedTypes != AllowedDataTypes.SIZABLE_DYNAMIC_AND_BITFIELD) {
+				throw new InvalidDataTypeException("Bitfield data-type not allowed");
 			}
+			return;
 		}
-		else if (allowedTypes == AllowedDataTypes.SIZABLE_DYNAMIC) {
-			if (dt instanceof FactoryDataType) {
-				throw new InvalidDataTypeException("factory data-type not allowed");
-			}
-			if (dt instanceof Dynamic && !((Dynamic) dt).canSpecifyLength()) {
-				throw new InvalidDataTypeException("non-sizable data-type not allowed");
-			}
-		}
-		else if (allowedTypes == AllowedDataTypes.FIXED_LENGTH) {
-			if (dt.getLength() < 0) {
-				throw new InvalidDataTypeException("fixed-length data-type required");
-			}
+		switch (allowedTypes) {
+			case DYNAMIC:
+				if (dt instanceof FactoryDataType) {
+					throw new InvalidDataTypeException("Factory data-type not allowed");
+				}
+				break;
+			case SIZABLE_DYNAMIC:
+			case SIZABLE_DYNAMIC_AND_BITFIELD:
+				if (dt instanceof FactoryDataType) {
+					throw new InvalidDataTypeException("Factory data-type not allowed");
+				}
+				if (dt instanceof Dynamic && !((Dynamic) dt).canSpecifyLength()) {
+					throw new InvalidDataTypeException("non-sizable data-type not allowed");
+				}
+				break;
+			case FIXED_LENGTH:
+				if (dt.getLength() < 0) {
+					throw new InvalidDataTypeException("Fixed-length data-type required");
+				}
+				break;
+			case STRINGS_AND_FIXED_LENGTH:
+				if (dt.getLength() < 0 && !(dt instanceof AbstractStringDataType)) {
+					throw new InvalidDataTypeException("Fixed-length or string data-type required");
+				}
+				break;
+			case BITFIELD_BASE_TYPE:
+				if (!BitFieldDataType.isValidBaseDataType(dt)) {
+					throw new InvalidDataTypeException(
+						"Enum or integer derived data-type required");
+				}
+				break;
+			case ALL:
+				// do nothing
+				break;
+			default:
+				throw new InvalidDataTypeException(
+					"Unknown data type allowance specified: " + allowedTypes);
 		}
 	}
 
 	private DataType parseDataTypeModifiers(DataType namedDataType, String dataTypeModifiers)
 			throws InvalidDataTypeException {
-		int arraySequenceStartIndex = -1;
-		List<DtPiece> modifiers = new ArrayList<>();
-		for (String piece : splitDataTypeModifiers(dataTypeModifiers)) {
-			if (piece.startsWith("*")) {
-				modifiers.add(new PointerSpecPiece(piece));
-				arraySequenceStartIndex = -1;
-			}
-			else if (piece.startsWith("[")) {
-				// group of array specifications are reversed for proper data-type creation order
-				ArraySpecPiece arraySpec = new ArraySpecPiece(piece);
-				if (arraySequenceStartIndex >= 0) {
-					modifiers.add(arraySequenceStartIndex, arraySpec);
-				}
-				else {
-					arraySequenceStartIndex = modifiers.size();
-					modifiers.add(arraySpec);
-				}
-			}
-			else if (piece.startsWith("{")) {
-				// # indicates the size of an array element when the base data type is dynamic.
-				modifiers.add(new ElementSizeSpecPiece(piece));
-				arraySequenceStartIndex = -1;
-			}
-		}
+
+		List<DtPiece> modifiers = parseModifiers(dataTypeModifiers);
 		DataType dt = namedDataType;
 		int elementLength = dt.getLength();
 		try {
@@ -211,22 +270,71 @@ public class DataTypeParser {
 						elementLength = ((ElementSizeSpecPiece) modifier).getElementSize();
 					}
 				}
-				else {
+				else if (modifier instanceof ArraySpecPiece) {
 					int elementCount = ((ArraySpecPiece) modifier).getElementCount();
 					dt = createArrayDataType(dt, elementLength, elementCount);
 					elementLength = dt.getLength();
+				}
+				else if (modifier instanceof BitfieldSpecPiece) {
+					if (allowedTypes != AllowedDataTypes.SIZABLE_DYNAMIC_AND_BITFIELD) {
+						throw new InvalidDataTypeException("Bitfield not permitted");
+					}
+					if (destinationDataTypeManager == null) {
+						throw new AssertException(
+							"Bitfields require destination datatype manager to be specified");
+					}
+					int bitSize = ((BitfieldSpecPiece) modifier).getBitSize();
+					dt = new ProxyBitFieldDataType(dt.clone(destinationDataTypeManager), bitSize);
 				}
 			}
 		}
 		catch (IllegalArgumentException e) {
 			throw new InvalidDataTypeException(e.getMessage());
 		}
-		checkAllowableType(dt, allowedTypes);
+		ensureIsAllowableType(dt, allowedTypes);
 		return dt;
 	}
 
+	private List<DtPiece> parseModifiers(String dataTypeModifiers) throws InvalidDataTypeException {
+
+		int arrayStartIndex = -1;
+		List<DtPiece> modifiers = new ArrayList<>();
+		boolean terminalModifier = false;
+		for (String piece : splitDataTypeModifiers(dataTypeModifiers)) {
+			piece = piece.trim();
+			if (terminalModifier) {
+				throw new InvalidDataTypeException("Invalid data type modifier");
+			}
+			if (piece.startsWith("*")) {
+				modifiers.add(new PointerSpecPiece(piece));
+				arrayStartIndex = -1;
+			}
+			else if (piece.startsWith("[")) {
+				// group of array specifications are reversed for proper data-type creation order
+				ArraySpecPiece arraySpec = new ArraySpecPiece(piece);
+				if (arrayStartIndex >= 0) {
+					modifiers.add(arrayStartIndex, arraySpec);
+				}
+				else {
+					arrayStartIndex = modifiers.size();
+					modifiers.add(arraySpec);
+				}
+			}
+			else if (piece.startsWith(":")) {
+				terminalModifier = true;
+				modifiers.add(new BitfieldSpecPiece(piece));
+			}
+			else if (piece.startsWith("{")) {
+				// # indicates the size of an array element when the base data type is dynamic.
+				modifiers.add(new ElementSizeSpecPiece(piece));
+				arrayStartIndex = -1;
+			}
+		}
+		return modifiers;
+	}
+
 	private DataType getNamedDataType(String baseName, CategoryPath category)
-			throws InvalidDataTypeException {
+			throws InvalidDataTypeException, CancelledException {
 
 		List<DataType> results = new ArrayList<>();
 		DataType dt = findDataType(sourceDataTypeManager, baseName, category, results);
@@ -252,20 +360,37 @@ public class DataTypeParser {
 		return dt.clone(destinationDataTypeManager);
 	}
 
-	private DataType findDataTypeInAllDataTypeManagers(String baseName, List<DataType> results) {
+	private DataType findDataTypeInAllDataTypeManagers(String baseName, List<DataType> results)
+			throws CancelledException {
 		if (results.isEmpty() && dataTypeManagerService != null) {
 			results.addAll(
 				DataTypeUtils.getExactMatchingDataTypes(baseName, dataTypeManagerService));
 		}
 
-		DataType dt = null;
-		if (!results.isEmpty()) {
-			// try to heuristically pick the right type
-			dt = pickFromPossibleEquivalentDataTypes(results);
-			if (dt == null && dataTypeManagerService != null) {
-				// give up and ask the user
-				dt = dataTypeManagerService.getDataType(baseName);
-			}
+		if (results.isEmpty()) {
+			return null;
+		}
+
+		// try to heuristically pick the right type
+		DataType dt = pickFromPossibleEquivalentDataTypes(results);
+		if (dt != null) {
+			return dt;
+		}
+
+		// give up and ask the user
+		return proptUserForType(baseName);
+
+	}
+
+	private DataType proptUserForType(String baseName) throws CancelledException {
+
+		if (dataTypeManagerService == null) {
+			return null;
+		}
+
+		DataType dt = dataTypeManagerService.getDataType(baseName);
+		if (dt == null) {
+			throw new CancelledException();
 		}
 		return dt;
 	}
@@ -275,7 +400,7 @@ public class DataTypeParser {
 
 		DataTypeManager builtInDTM = BuiltInDataTypeManager.getDataTypeManager();
 		if (dtm == null) {
-			// not DTM specified--try the built-ins
+			// no DTM specified--try the built-ins
 			return findDataType(builtInDTM, baseName, category, list);
 		}
 
@@ -291,7 +416,7 @@ public class DataTypeParser {
 			// handle C primitives (e.g.  long long, unsigned long int, etc.)
 			DataType dataType = DataTypeUtilities.getCPrimitiveDataType(baseName);
 			if (dataType != null) {
-				return dataType;
+				return dataType.clone(dtm);
 			}
 
 			dtm.findDataTypes(baseName, list);
@@ -316,8 +441,7 @@ public class DataTypeParser {
 
 		// see if one of the data types belongs to the program or the built in types, where the
 		// program is more important than the builtin
-		for (Iterator<DataType> iter = dtList.iterator(); iter.hasNext();) {
-			DataType dataType = iter.next();
+		for (DataType dataType : dtList) {
 			DataTypeManager manager = dataType.getDataTypeManager();
 			if (manager instanceof BuiltInDataTypeManager) {
 				programDataType = dataType;
@@ -332,8 +456,7 @@ public class DataTypeParser {
 			return null;
 		}
 
-		for (Iterator<DataType> iter = dtList.iterator(); iter.hasNext();) {
-			DataType dataType = iter.next();
+		for (DataType dataType : dtList) {
 			// just one non-matching case means that we can't use the program's data type
 			if (!programDataType.isEquivalent(dataType)) {
 				return null;
@@ -345,9 +468,22 @@ public class DataTypeParser {
 
 	private static String getBaseString(String dataTypeString) {
 		int nextIndex = 0;
+		int templateCount = 0;
 		while (nextIndex < dataTypeString.length()) {
 			char c = dataTypeString.charAt(nextIndex);
-			if (c == '*' || c == '[' || c == '{') {
+			if (c == '<') {
+				templateCount++;
+			}
+			else if (c == '>') {
+				templateCount--;
+			}
+
+			if (templateCount != 0) {
+				++nextIndex;
+				continue;
+			}
+
+			if (c == '*' || c == '[' || c == ':' || c == '{') {
 				return dataTypeString.substring(0, nextIndex).trim();
 			}
 			++nextIndex;
@@ -356,7 +492,7 @@ public class DataTypeParser {
 	}
 
 	private static String[] splitDataTypeModifiers(String dataTypeModifiers) {
-		dataTypeModifiers = dataTypeModifiers.replaceAll("[ \\t]", "");
+		dataTypeModifiers = dataTypeModifiers.replaceAll(":[ \\t]", "");
 		if (dataTypeModifiers.length() == 0) {
 			return new String[0];
 		}
@@ -365,7 +501,7 @@ public class DataTypeParser {
 		int nextIndex = 1;
 		while (nextIndex < dataTypeModifiers.length()) {
 			char c = dataTypeModifiers.charAt(nextIndex);
-			if (c == '*' || c == '[' || c == '{') {
+			if (c == '*' || c == '[' || c == ':' || c == '{') {
 				list.add(dataTypeModifiers.substring(startIndex, nextIndex));
 				startIndex = nextIndex;
 			}
@@ -385,26 +521,51 @@ public class DataTypeParser {
 		}
 		if (elementLength <= 0) {
 			throw new InvalidDataTypeException(
-				"only a positive datatype element size may be used for array: " +
-					baseDataType.getName());
+				"Only a datatype with a positive size be used for an array: " +
+					baseDataType.getName() + "; " + elementLength);
 		}
 		return new ArrayDataType(baseDataType, elementCount, elementLength,
 			destinationDataTypeManager);
 	}
 
-	private static int parseArraySize(String numStr) {
-		numStr = (numStr == null ? "" : numStr.trim());
-		if (numStr.length() == 0) {
+	private static int parseSize(String size) {
+
+		if (StringUtils.isBlank(size)) {
 			throw new NumberFormatException();
 		}
-		if (numStr.startsWith("0x") || numStr.startsWith("0X")) {
-			return Integer.parseInt(numStr.substring(2), 16);
+		size = size.trim();
+		if (StringUtils.startsWithIgnoreCase(size, "0x")) {
+			return Integer.parseInt(size.substring(2), 16);
 		}
-		return Integer.parseInt(numStr);
+		return Integer.parseInt(size);
 	}
 
 	private static interface DtPiece {
 		// dummy interface so we don't have to use Object in the list container
+	}
+
+	private static class BitfieldSpecPiece implements DtPiece {
+		int bitSize;
+
+		BitfieldSpecPiece(String piece) throws InvalidDataTypeException {
+			if (piece.startsWith(":")) {
+				String bitSizeStr = piece.substring(1);
+				try {
+					bitSize = parseSize(bitSizeStr);
+					if (bitSize >= 0) {
+						return;
+					}
+				}
+				catch (NumberFormatException e) {
+					// handled below
+				}
+			}
+			throw new InvalidDataTypeException("Invalid bitfield specification: " + piece);
+		}
+
+		int getBitSize() {
+			return bitSize;
+		}
 	}
 
 	private static class ArraySpecPiece implements DtPiece {
@@ -414,14 +575,14 @@ public class DataTypeParser {
 			if (piece.startsWith("[") && piece.endsWith("]")) {
 				String elementCountStr = piece.substring(1, piece.length() - 1);
 				try {
-					elementCount = parseArraySize(elementCountStr);
+					elementCount = parseSize(elementCountStr);
 					return;
 				}
 				catch (NumberFormatException e) {
 					// handled below
 				}
 			}
-			throw new InvalidDataTypeException("invalid array specification: " + piece);
+			throw new InvalidDataTypeException("Invalid array specification: " + piece);
 		}
 
 		int getElementCount() {
@@ -434,7 +595,7 @@ public class DataTypeParser {
 
 		PointerSpecPiece(String piece) throws InvalidDataTypeException {
 			if (!piece.startsWith("*")) {
-				throw new InvalidDataTypeException("invalid pointer specification: " + piece);
+				throw new InvalidDataTypeException("Invalid pointer specification: " + piece);
 			}
 			if (piece.length() == 1) {
 				return;
@@ -443,12 +604,12 @@ public class DataTypeParser {
 				pointerSize = Integer.parseInt(piece.substring(1));
 			}
 			catch (NumberFormatException e) {
-				throw new InvalidDataTypeException("invalid pointer specification: " + piece);
+				throw new InvalidDataTypeException("Invalid pointer specification: " + piece);
 			}
 			int mod = pointerSize % 8;
 			pointerSize = pointerSize / 8;
 			if (mod != 0 || pointerSize <= 0 || pointerSize > 8) {
-				throw new InvalidDataTypeException("invalid pointer size: " + piece);
+				throw new InvalidDataTypeException("Invalid pointer size: " + piece);
 			}
 		}
 
@@ -464,7 +625,7 @@ public class DataTypeParser {
 			if (piece.startsWith("{") && piece.endsWith("}")) {
 				String elementSizeStr = piece.substring(1, piece.length() - 1);
 				try {
-					elementSize = parseArraySize(elementSizeStr);
+					elementSize = parseSize(elementSizeStr);
 					return;
 				}
 				catch (NumberFormatException e) {
@@ -472,7 +633,7 @@ public class DataTypeParser {
 				}
 			}
 			throw new InvalidDataTypeException(
-				"invalid array element size specification: " + piece);
+				"Invalid array element size specification: " + piece);
 		}
 
 		int getElementSize() {

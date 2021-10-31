@@ -20,7 +20,7 @@ package ghidra.program.database.data;
 
 import java.io.IOException;
 
-import db.Record;
+import db.DBRecord;
 import ghidra.program.model.data.*;
 import ghidra.program.model.listing.Parameter;
 import ghidra.program.model.listing.Variable;
@@ -32,19 +32,19 @@ import ghidra.program.model.symbol.SymbolUtilities;
 final class ParameterDefinitionDB implements ParameterDefinition {
 
 	private DataTypeManagerDB dataMgr;
-	private Record record;
+	private DBRecord record;
 	private FunctionDefinitionDB parent;
 	private FunctionParameterAdapter adapter;
 
 	ParameterDefinitionDB(DataTypeManagerDB dataMgr, FunctionParameterAdapter adapter,
-			FunctionDefinitionDB parent, Record record) {
+			FunctionDefinitionDB parent, DBRecord record) {
 		this.dataMgr = dataMgr;
 		this.parent = parent;
 		this.adapter = adapter;
 		this.record = record;
 	}
 
-	Record getRecord() {
+	DBRecord getRecord() {
 		return record;
 	}
 
@@ -64,13 +64,19 @@ final class ParameterDefinitionDB implements ParameterDefinition {
 
 	@Override
 	public void setDataType(DataType type) {
-		type = ParameterDefinitionImpl.checkDataType(type, dataMgr);
+		type = ParameterDefinitionImpl.validateDataType(type, dataMgr, false);
+
+		getDataType().removeParent(parent);
+
+		type = dataMgr.resolve(type, null);
+		type.addParent(parent);
+
 		record.setLongValue(FunctionParameterAdapter.PARAMETER_DT_ID_COL,
 			dataMgr.getResolvedID(type));
 		record.setIntValue(FunctionParameterAdapter.PARAMETER_DT_LENGTH_COL, type.getLength());
 		try {
 			adapter.updateRecord(record);
-			dataMgr.dataTypeChanged(parent);
+			dataMgr.dataTypeChanged(parent, false);
 		}
 		catch (IOException e) {
 			dataMgr.dbError(e);
@@ -103,7 +109,7 @@ final class ParameterDefinitionDB implements ParameterDefinition {
 		record.setString(FunctionParameterAdapter.PARAMETER_NAME_COL, name);
 		try {
 			adapter.updateRecord(record);
-			dataMgr.dataTypeChanged(parent);
+			dataMgr.dataTypeChanged(parent, false);
 		}
 		catch (IOException e) {
 			dataMgr.dbError(e);
@@ -120,7 +126,7 @@ final class ParameterDefinitionDB implements ParameterDefinition {
 		record.setString(FunctionParameterAdapter.PARAMETER_COMMENT_COL, comment);
 		try {
 			adapter.updateRecord(record);
-			dataMgr.dataTypeChanged(parent);
+			dataMgr.dataTypeChanged(parent, false);
 		}
 		catch (IOException e) {
 			dataMgr.dbError(e);
@@ -134,27 +140,6 @@ final class ParameterDefinitionDB implements ParameterDefinition {
 	@Override
 	public int getOrdinal() {
 		return record.getIntValue(FunctionParameterAdapter.PARAMETER_ORDINAL_COL);
-	}
-
-	@Override
-	public boolean equals(Object obj) {
-		if (obj == null) {
-			return false;
-		}
-		if (obj == this) {
-			return true;
-		}
-		if (!(obj instanceof ParameterDefinition)) {
-			return false;
-		}
-		ParameterDefinition p = (ParameterDefinition) obj;
-		if ((getOrdinal() == p.getOrdinal()) && (getName().equals(p.getName())) &&
-			(getDataType().isEquivalent(p.getDataType()))) {
-			String myCmt = getComment();
-			String otherCmt = p.getComment();
-			return (myCmt == null) ? (otherCmt == null) : (myCmt.equals(otherCmt));
-		}
-		return false;
 	}
 
 	@Override

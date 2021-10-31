@@ -111,7 +111,7 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		BookmarkType[] types = bmMgr.getBookmarkTypes();
 		assertEquals(8, types.length);
 
-		checkBookmarkList(bookmarks);
+		checkBookmarkTable(bookmarks);
 		DockingActionIf pa = getAction(plugin, "Filter Bookmarks");
 		performAction(pa, false);
 
@@ -123,7 +123,7 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		});
 
 		Bookmark[] bms = new Bookmark[] { bookmarks[6], bookmarks[7], bookmarks[8] };
-		checkBookmarkList(bms);
+		checkBookmarkTable(bms);
 	}
 
 	@Test
@@ -131,7 +131,7 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 
 		showBookmarkProvider();
 
-		checkBookmarkList(bookmarks);
+		checkBookmarkTable(bookmarks);
 		BookmarkTableModel model = (BookmarkTableModel) table.getModel();
 		DefaultTableTextFilterFactory<BookmarkRowObject> factory =
 			new DefaultTableTextFilterFactory<>(new FilterOptions());
@@ -141,16 +141,16 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		runSwing(() -> model.setTableFilter(factory.getTableFilter("help", transformer)));
 
 		Bookmark[] bms = new Bookmark[] {};
-		checkBookmarkList(bms);
+		checkBookmarkTable(bms);
 
 		runSwing(() -> model.setTableFilter(factory.getTableFilter("Test20", transformer)));
 
 		bms = new Bookmark[] { bookmarks[1], bookmarks[2] };
-		checkBookmarkList(bms);
+		checkBookmarkTable(bms);
 
 		runSwing(() -> model.setTableFilter(null));
 
-		checkBookmarkList(bookmarks);
+		checkBookmarkTable(bookmarks);
 	}
 
 	@Test
@@ -332,7 +332,7 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 
 		Bookmark[] bms = new Bookmark[] { bookmarks[0], bookmarks[1], bookmarks[3], bookmarks[4],
 			bookmarks[5], bookmarks[6], bookmarks[7], bookmarks[8] };
-		checkBookmarkList(bms);
+		checkBookmarkTable(bms);
 
 		selectRow(2, false);
 		selectRow(5, true);
@@ -340,7 +340,7 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		performAction(deleteAction, true);
 		bms = new Bookmark[] { bookmarks[0], bookmarks[1], bookmarks[4], bookmarks[5], bookmarks[7],
 			bookmarks[8] };
-		checkBookmarkList(bms);
+		checkBookmarkTable(bms);
 
 	}
 
@@ -395,7 +395,7 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 	@Test
 	public void testAddBookmark() throws Exception {
 		showBookmarkProvider();
-		checkBookmarkList(bookmarks);
+		checkBookmarkTable(bookmarks);
 
 		DockingActionIf pa = getAction(plugin, "Add Bookmark");
 		performAction(pa, codeViewerProvider, false);
@@ -417,13 +417,13 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		Bookmark[] bks = new Bookmark[10];
 		list.toArray(bks);
 		Arrays.sort(bks);
-		checkBookmarkList(bks);
+		checkBookmarkTable(bks);
 
 		undo(program);
-		checkBookmarkList(bookmarks);
+		checkBookmarkTable(bookmarks);
 
 		redo(program);
-		checkBookmarkList(bks);
+		checkBookmarkTable(bks);
 	}
 
 	@Test
@@ -432,18 +432,49 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		Bookmark bookmark = list.get(0);
 		Address address = bookmark.getAddress();
 		DeleteBookmarkAction action = new DeleteBookmarkAction(plugin, bookmark, true);
-		MarkerLocation markerLocation = new MarkerLocation(null, address, 0, 0);
-		performAction(action, new ActionContext(null, markerLocation), true);
+		MarkerLocation markerLocation = new MarkerLocation(null, program, address, 0, 0);
+		performAction(action, createContext(markerLocation), true);
 		list = getBookmarks(program.getBookmarkManager());
 		assertFalse(list.contains(bookmark));
 
 		bookmark = list.get(0);
 		address = bookmark.getAddress();
 		action = new DeleteBookmarkAction(plugin, bookmark, false);
-		markerLocation = new MarkerLocation(null, address, 0, 0);
-		performAction(action, new ActionContext(null, markerLocation), true);
+		markerLocation = new MarkerLocation(null, program, address, 0, 0);
+		performAction(action, createContext(markerLocation), true);
 		list = getBookmarks(program.getBookmarkManager());
 		assertFalse(list.contains(bookmark));
+	}
+
+	@Test
+	public void testDeleteBookmarkUpdatesTable() throws Exception {
+
+		//
+		// This test catches a bug with removing a deleted bookmark from the table.   The bug was
+		// triggered by a failure in the binary search.  Specifically, if the binary search does
+		// not touch the item to be deleted, then the item would not get removed from the table.
+		// 
+
+		showBookmarkProvider();
+
+		List<Bookmark> list = getBookmarks(program.getBookmarkManager());
+		int n = list.size();
+		int rowCount = n;
+		for (int i = 0; i < n; i++) {
+
+			// cannot merely delete from the beginning to trigger this bug
+			int index = getRandomInt(0, list.size() - 1);
+			Bookmark bookmark = list.get(index);
+			Address address = bookmark.getAddress();
+			DeleteBookmarkAction action = new DeleteBookmarkAction(plugin, bookmark, true);
+			MarkerLocation markerLocation = new MarkerLocation(null, program, address, 0, 0);
+			performAction(action, createContext(markerLocation), true);
+
+			waitForTable();
+			assertEquals(rowCount - 1, table.getRowCount());
+			list = getBookmarks(program.getBookmarkManager());
+			rowCount = list.size();
+		}
 	}
 
 	@Test
@@ -477,12 +508,8 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		waitForTable();
 
 		selectAllTableRows();
-
 		runSwing(() -> provider.delete());
-
-		waitForTable();
-
-		assertEquals(0, table.getRowCount());
+		waitForCondition(() -> table.getRowCount() == 0, "Bookmarks not deleted");
 	}
 
 	@Test
@@ -543,8 +570,8 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		CreateStructureCmd cmd = new CreateStructureCmd(addr("0100b6db"), 20);
 		applyCmd(program, cmd);
 
-		List<DockingActionIf> actions = runSwing(() -> plugin.getPopupActions(
-			new ActionContext(null, new MarkerLocation(null, addr("0100b6db"), 0, 0))));
+		List<DockingActionIf> actions = runSwing(() -> plugin.getPopupActions(null,
+			createContext(new MarkerLocation(null, program, addr("0100b6db"), 0, 0))));
 		assertEquals(10, actions.size());
 	}
 
@@ -624,6 +651,21 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		assertEquals(addr("1001010"), bookmark.getAddress());
 	}
 
+	@Test
+	public void testRemoveBookmarksByType() {
+
+		List<Bookmark> list = getBookmarks(program.getBookmarkManager());
+		assertFalse(list.isEmpty());
+
+		BookmarkManager bm = program.getBookmarkManager();
+		tx(program, () -> {
+			bm.removeBookmarks(BookmarkType.ALL_TYPES);
+		});
+
+		list = getBookmarks(program.getBookmarkManager());
+		assertTrue(list.isEmpty());
+	}
+
 //==================================================================================================
 // Private Methods
 //==================================================================================================
@@ -636,7 +678,6 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 	}
 
 	private void loadDefaultTool() throws Exception {
-//		env = new TestEnv();
 		program = buildProgram();
 
 		// UNUSUAL CODE ALERT!: 
@@ -718,7 +759,7 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 	}
 
 	private void showBookmarkProvider() throws Exception {
-		DockingActionIf action = getAction(plugin, "Show Bookmarks");
+		DockingActionIf action = getAction(plugin, "Bookmarks");
 		performAction(action, true);
 		table = plugin.getBookmarkTable();
 		waitForTable();
@@ -729,7 +770,7 @@ public class BookmarkPluginTest extends AbstractGhidraHeadedIntegrationTest {
 		waitForTableModel((ThreadedTableModel<Bookmark, ?>) table.getModel());
 	}
 
-	private void checkBookmarkList(Bookmark[] bookmarksToCheck) {
+	private void checkBookmarkTable(Bookmark[] bookmarksToCheck) {
 		waitForBusyTool(tool);
 		waitForTable();
 

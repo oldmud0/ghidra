@@ -22,7 +22,6 @@ import java.awt.event.KeyEvent;
 import java.io.File;
 
 import javax.swing.JTable;
-import javax.swing.JTextField;
 
 import org.junit.*;
 
@@ -524,7 +523,7 @@ public class StructureEditorLockedCellEditTest extends AbstractStructureEditorTe
 	public void testEditDataTypeNotSelf() throws Exception {
 
 		Structure testStruct = new StructureDataType("testStruct", 20);
-		testStruct.setInternallyAligned(false);
+		testStruct.setPackingEnabled(false);
 
 		DataTypeManager dtm = program.getDataTypeManager();
 		txId = program.startTransaction("Add testStruct");
@@ -780,10 +779,5 @@ public class StructureEditorLockedCellEditTest extends AbstractStructureEditorTe
 
 		escape();
 		assertNotEditingField();
-	}
-
-	protected void setText(String s) {
-		JTextField tf = getActiveEditorTextField();
-		setText(tf, s);
 	}
 }

@@ -15,33 +15,28 @@
  */
 package ghidra.program.model.data;
 
-import java.io.Serializable;
-import java.net.URL;
-import java.util.ArrayList;
-import java.util.Iterator;
+import java.lang.ref.WeakReference;
+import java.util.*;
+import java.util.function.Consumer;
 
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 
-import ghidra.app.plugin.core.datamgr.archive.SourceArchive;
 import ghidra.docking.settings.*;
-import ghidra.program.model.mem.MemBuffer;
 import ghidra.util.*;
 
 /**
  * Base implementation for dataTypes.
  */
-public abstract class DataTypeImpl implements DataType, ChangeListener, Serializable {
+public abstract class DataTypeImpl extends AbstractDataType implements ChangeListener {
+
 	private final static SettingsDefinition[] EMPTY_DEFINITIONS = new SettingsDefinition[0];
 	protected Settings defaultSettings;
-	protected String name;
-	protected CategoryPath categoryPath;
-	private ArrayList<DataType> parentList;
+	private List<WeakReference<DataType>> parentList;
 	private UniversalID universalID;
 	private SourceArchive sourceArchive;
 	private long lastChangeTime;
 	private long lastChangeTimeInSourceArchive;
-	private DataTypeManager dataMgr;
 
 	protected DataTypeImpl(CategoryPath path, String name, DataTypeManager dataMgr) {
 		this(path, name, null, null, System.currentTimeMillis(), NO_LAST_CHANGE_TIME, dataMgr);
@@ -50,20 +45,7 @@ public abstract class DataTypeImpl implements DataType, ChangeListener, Serializ
 	DataTypeImpl(CategoryPath path, String name, UniversalID universalID,
 			SourceArchive sourceArchive, long lastChangeTime, long lastChangeTimeInSourceArchive,
 			DataTypeManager dataMgr) {
-		if (path == null) {
-			throw new IllegalArgumentException("Category Path is null!");
-		}
-		if (name == null || name.length() == 0) {
-			throw new IllegalArgumentException("Name is null or empty!");
-		}
-
-		// allow spaces since derived types may have spaces (pointers for example: foo *32)
-		if (!DataUtilities.isValidDataTypeName(name)) {
-			throw new IllegalArgumentException("Invalid DataType name: " + name);
-		}
-		this.categoryPath = path;
-		this.name = name;
-		this.dataMgr = dataMgr;
+		super(path, name, dataMgr);
 		defaultSettings = new SettingsImpl(this, null);
 		parentList = new ArrayList<>();
 		this.universalID = universalID == null ? UniversalIdGenerator.nextID() : universalID;
@@ -72,94 +54,26 @@ public abstract class DataTypeImpl implements DataType, ChangeListener, Serializ
 		this.lastChangeTimeInSourceArchive = lastChangeTimeInSourceArchive;
 	}
 
-	/**
-	 * Returns the DataOrganization associated with this
-	 * data-types DataTypeManager
-	 */
-	protected final DataOrganization getDataOrganization() {
-		DataOrganization dataOrganization = null;
-		if (dataMgr != null) {
-			dataOrganization = dataMgr.getDataOrganization();
-		}
-		if (dataOrganization == null) {
-			dataOrganization = DataOrganizationImpl.getDefaultOrganization();
-		}
-		return dataOrganization;
-	}
-
-	@Override
-	public boolean isNotYetDefined() {
-		return false;
-	}
-
 	@Override
 	public Class<?> getValueClass(Settings settings) {
 		return null;
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataType#getDefaultSettings()
-	 */
 	@Override
 	public Settings getDefaultSettings() {
 		return defaultSettings;
 	}
 
-	/* (non-Javadoc)
-	 * @see ghidra.program.model.data.DataType#getCategoryPath()
-	 */
-	@Override
-	public CategoryPath getCategoryPath() {
-		return categoryPath;
-	}
-
-	@Override
-	public DataTypePath getDataTypePath() {
-		return new DataTypePath(categoryPath, name);
-	}
-
-	/**
-	 * @see ghidra.program.model.data.DataType#getDocs()
-	 */
-	@Override
-	public URL getDocs() {
-		return null;
-	}
-
-	/**
-	 * @see ghidra.program.model.data.DataType#getSettingsDefinitions()
-	 */
 	@Override
 	public SettingsDefinition[] getSettingsDefinitions() {
 		return EMPTY_DEFINITIONS;
 	}
 
 	/**
-	 * @see ghidra.program.model.data.DataType#getName()
-	 */
-	@Override
-	public String getName() {
-		return name;
-	}
-
-	/* (non-Javadoc)
-	 * @see ghidra.program.model.data.DataType#getDisplayName()
-	 */
-	@Override
-	public String getDisplayName() {
-		return getName();
-	}
-
-	@Override
-	public String toString() {
-		return getDisplayName();
-	}
-
-	/**
 	 * Check if the name is a valid name for a data type
-	 * 
+	 *
 	 * @param checkedName name to check
-	 * 
+	 *
 	 * @throws InvalidNameException if the name is invalid
 	 */
 	void checkValidName(String checkedName) throws InvalidNameException {
@@ -168,42 +82,16 @@ public abstract class DataTypeImpl implements DataType, ChangeListener, Serializ
 		}
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataType#isDeleted()
-	 */
-	@Override
-	public boolean isDeleted() {
-		return false;
-	}
-
-	/**
-	 * @see javax.swing.event.ChangeListener#stateChanged(javax.swing.event.ChangeEvent)
-	 */
 	@Override
 	public void stateChanged(ChangeEvent e) {
 		// don't care
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataType#getDataTypeManager()
-	 */
-	@Override
-	public DataTypeManager getDataTypeManager() {
-		return dataMgr;
-	}
-
-	/**
-	 * 
-	 * @see ghidra.program.model.data.DataType#setDefaultSettings(ghidra.docking.settings.Settings)
-	 */
 	@Override
 	public void setDefaultSettings(Settings settings) {
 		defaultSettings = settings;
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataType#getPathName()
-	 */
 	@Override
 	public String getPathName() {
 		return getDataTypePath().getPath();
@@ -215,68 +103,78 @@ public abstract class DataTypeImpl implements DataType, ChangeListener, Serializ
 		if (length < 0) {
 			return 1;
 		}
-		return getDataOrganization().getAlignment(this, length);
+		return getDataOrganization().getAlignment(this);
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataType#addParent(ghidra.program.model.data.DataType)
-	 */
 	@Override
 	public void addParent(DataType dt) {
-		parentList.add(dt);
+		parentList.add(new WeakReference<>(dt));
 	}
 
-	/**
-	 * @see ghidra.program.model.data.DataType#removeParent(ghidra.program.model.data.DataType)
-	 */
 	@Override
 	public void removeParent(DataType dt) {
-		parentList.remove(dt);
-	}
-
-	/* (non-Javadoc)
-	 * @see ghidra.program.model.data.DataType#getParents()
-	 */
-	@Override
-	public DataType[] getParents() {
-		DataType[] dts = new DataType[parentList.size()];
-		return parentList.toArray(dts);
-
-	}
-
-	/**
-	 * Notify any parent data types that my size has changed.
-	 */
-	protected void notifySizeChanged() {
-		Iterator<DataType> it = parentList.iterator();
-		while (it.hasNext()) {
-			DataType dt = it.next();
-			dt.dataTypeSizeChanged(this);
+		Iterator<WeakReference<DataType>> iterator = parentList.iterator();
+		while (iterator.hasNext()) {
+			WeakReference<DataType> ref = iterator.next();
+			DataType dataType = ref.get();
+			if (dataType == null) {
+				iterator.remove();
+			}
+			else if (dt == dataType) {
+				iterator.remove();
+				break;
+			}
 		}
 	}
 
+	@Override
+	public DataType[] getParents() {
+		List<DataType> parents = new ArrayList<>();
+		Iterator<WeakReference<DataType>> iterator = parentList.iterator();
+		while (iterator.hasNext()) {
+			WeakReference<DataType> ref = iterator.next();
+			DataType dataType = ref.get();
+			if (dataType == null) {
+				iterator.remove();
+			}
+			else {
+				parents.add(dataType);
+			}
+		}
+		DataType[] array = new DataType[parents.size()];
+		return parents.toArray(array);
+	}
+
 	/**
-	 * Notify any parents that my name has changed.
-	 * 
+	 * Notify all parents that the size of this datatype has changed or
+	 * other significant change that may affect a parent containing this
+	 * datatype.
+	 */
+	protected void notifySizeChanged() {
+		notifyParents(dt -> dt.dataTypeSizeChanged(this));
+	}
+
+	/**
+	 * Notify all parents that this datatype's alignment has changed
+	 */
+	protected void notifyAlignmentChanged() {
+		notifyParents(dt -> dt.dataTypeAlignmentChanged(this));
+	}
+
+	/**
+	 * Notify all parents that this datatype's name has changed
+	 *
 	 * @param oldName
 	 */
 	protected void notifyNameChanged(String oldName) {
-		Iterator<DataType> it = parentList.iterator();
-		while (it.hasNext()) {
-			DataType dt = it.next();
-			dt.dataTypeNameChanged(this, oldName);
-		}
+		notifyParents(dt -> dt.dataTypeNameChanged(this, oldName));
 	}
 
 	/**
-	 * Notify any parents that I am deleted.
+	 * Notify all parents that this datatype has been deleted
 	 */
 	protected void notifyDeleted() {
-		Iterator<DataType> it = parentList.iterator();
-		while (it.hasNext()) {
-			DataType dt = it.next();
-			dt.dataTypeDeleted(this);
-		}
+		notifyParents(dt -> dt.dataTypeDeleted(this));
 	}
 
 	/**
@@ -284,34 +182,21 @@ public abstract class DataTypeImpl implements DataType, ChangeListener, Serializ
 	 * @param replacement replacement data type
 	 */
 	protected void notifyReplaced(DataType replacement) {
-		Iterator<DataType> it = parentList.iterator();
-		while (it.hasNext()) {
-			DataType dt = it.next();
-			dt.dataTypeReplaced(this, replacement);
+		notifyParents(dt -> dt.dataTypeReplaced(this, replacement));
+	}
+
+	protected final void notifyParents(Consumer<DataType> consumer) {
+		Iterator<WeakReference<DataType>> iterator = parentList.iterator();
+		while (iterator.hasNext()) {
+			WeakReference<DataType> ref = iterator.next();
+			DataType dataType = ref.get();
+			if (dataType == null) {
+				iterator.remove();
+			}
+			else {
+				consumer.accept(dataType);
+			}
 		}
-	}
-
-	@Override
-	public String getDefaultLabelPrefix() {
-		return null;
-	}
-
-	@Override
-	public String getDefaultAbbreviatedLabelPrefix() {
-		return getDefaultLabelPrefix();
-	}
-
-	@Override
-	public String getDefaultLabelPrefix(MemBuffer buf, Settings settings, int len,
-			DataTypeDisplayOptions options) {
-		return getDefaultLabelPrefix();
-	}
-
-	@Override
-	public String getDefaultOffcutLabelPrefix(MemBuffer buf, Settings settings, int len,
-			DataTypeDisplayOptions options, int offcutLength) {
-		// By default we will do nothing different for offcut values
-		return getDefaultLabelPrefix(buf, settings, len, options);
 	}
 
 	@Override
@@ -370,7 +255,7 @@ public abstract class DataTypeImpl implements DataType, ChangeListener, Serializ
 	@Override
 	public int hashCode() {
 		// Note: this works because the DTMs have to be equal and there can be only one DT with
-		//       the same name and category path		
+		//       the same name and category path
 		return getName().hashCode();
 	}
 

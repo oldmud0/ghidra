@@ -1,6 +1,5 @@
 /* ###
  * IP: GHIDRA
- * REVIEWED: YES
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,28 +17,29 @@ package ghidra.framework.main.datatree;
 
 import java.awt.datatransfer.DataFlavor;
 
-public class GhidraDataFlavorHandlerService extends DataFlavorHandlerService {
-	@Override
-	protected void doRegisterDataFlavorHandlers() {
-		try {
-			DataFlavor linuxFileUrlFlavor =
-				new DataFlavor("application/x-java-serialized-object;class=java.lang.String");
-			DataTreeDragNDropHandler.addActiveDataFlavorHandler(linuxFileUrlFlavor,
-				new LinuxFileUrlHandler());
-		}
-		catch (ClassNotFoundException cnfe) {
-			// should never happen as it is using java.lang.String
-		}
+public class GhidraDataFlavorHandlerService {
 
-		final LocalTreeNodeHandler localTreeNodeHandler = new LocalTreeNodeHandler();
+	public GhidraDataFlavorHandlerService() {
+
+		//
+		// Note: the order of the file drop flavors/handlers is intentional.  We wish to process
+		//       objects first which we know to be transfered from within the current JVM.  After
+		//       that, then process objects given to us from the OS or another JVM.
+		//
+
+		LocalTreeNodeHandler localNodeHandler = new LocalTreeNodeHandler();
 		DataTreeDragNDropHandler.addActiveDataFlavorHandler(
-			DataTreeDragNDropHandler.localDomainFileTreeFlavor, localTreeNodeHandler);
-		DataTreeDragNDropHandler.addActiveDataFlavorHandler(DataFlavor.javaFileListFlavor,
-			new JavaFileListHandler());
+			DataTreeDragNDropHandler.localDomainFileTreeFlavor, localNodeHandler);
+
 		DataTreeDragNDropHandler.addActiveDataFlavorHandler(
 			VersionInfoTransferable.localVersionInfoFlavor, new LocalVersionInfoHandler());
+		DataTreeDragNDropHandler.addActiveDataFlavorHandler(DataFlavor.javaFileListFlavor,
+			new JavaFileListHandler());
 
-		DataTreeDragNDropHandler.addInactiveDataFlavorHandler(
-			DataTreeDragNDropHandler.localDomainFileTreeFlavor, localTreeNodeHandler);
+		DataFlavor linuxFileUrlFlavor =
+			new DataFlavor("application/x-java-serialized-object;class=java.lang.String",
+				"String file URL");
+		DataTreeDragNDropHandler.addActiveDataFlavorHandler(linuxFileUrlFlavor,
+			new LinuxFileUrlHandler());
 	}
 }

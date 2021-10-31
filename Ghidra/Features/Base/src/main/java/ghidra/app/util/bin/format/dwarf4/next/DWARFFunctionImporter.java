@@ -22,8 +22,7 @@ import java.util.stream.Collectors;
 import ghidra.app.cmd.comments.AppendCommentCmd;
 import ghidra.app.cmd.label.SetLabelPrimaryCmd;
 import ghidra.app.util.bin.format.dwarf4.*;
-import ghidra.app.util.bin.format.dwarf4.encoding.DWARFAttribute;
-import ghidra.app.util.bin.format.dwarf4.encoding.DWARFTag;
+import ghidra.app.util.bin.format.dwarf4.encoding.*;
 import ghidra.app.util.bin.format.dwarf4.expression.*;
 import ghidra.program.database.function.OverlappingFunctionException;
 import ghidra.program.model.address.Address;
@@ -202,26 +201,26 @@ public class DWARFFunctionImporter {
 			return;
 		}
 
-		DWARFFunction function = new DWARFFunction(prog.getName(diea));
-		function.namespace = function.dni.getParentNamespace(currentProgram);
+		DWARFFunction dfunc = new DWARFFunction(prog.getName(diea));
+		dfunc.namespace = dfunc.dni.getParentNamespace(currentProgram);
 
 		Number lowPC = diea.getLowPC(0);
-		function.address = toAddr(lowPC);
-		function.highAddress =
+		dfunc.address = toAddr(lowPC);
+		dfunc.highAddress =
 			diea.hasAttribute(DWARFAttribute.DW_AT_high_pc) ? toAddr(diea.getHighPC()) : null;
 
-		String previousFunctionProcessed = functionsProcessed.get(function.address);
+		String previousFunctionProcessed = functionsProcessed.get(dfunc.address);
 		if (previousFunctionProcessed != null) {
 //			Msg.info(this, "Duplicate function defintion found for " + dni.getCategoryPath() +
 //				" at " + function.address + " in DIE " + diea.getHexOffset() + ", skipping");
 			markAllChildrenAsProcessed(diea.getHeadFragment());
 			return;
 		}
-		functionsProcessed.put(function.address,
-			function.dni.getNamespacePath() + " DIE: " + diea.getHexOffset());
+		functionsProcessed.put(dfunc.address,
+			dfunc.dni.getNamespacePath() + " DIE: " + diea.getHexOffset());
 
 		// Check if the function is an external function
-		function.isExternal = diea.getBool(DWARFAttribute.DW_AT_external, false);
+		dfunc.isExternal = diea.getBool(DWARFAttribute.DW_AT_external, false);
 
 		// Retrieve the frame base if it exists
 		DWARFLocation frameLoc = null;
@@ -229,9 +228,9 @@ public class DWARFFunctionImporter {
 			List<DWARFLocation> frameBase = diea.getAsLocation(DWARFAttribute.DW_AT_frame_base);
 			// get the framebase register, find where the frame is finally set
 			// up.
-			frameLoc = getTopLocation(frameBase, function.address.getOffset());
+			frameLoc = getTopLocation(frameBase, dfunc.address.getOffset());
 			if (frameLoc != null) {
-				function.frameBase = (int) diea.evaluateLocation(frameLoc);
+				dfunc.frameBase = (int) diea.evaluateLocation(frameLoc);
 			}
 		}
 
@@ -245,26 +244,143 @@ public class DWARFFunctionImporter {
 		// function passing a pointer to the callee function where the object is
 		// then operated on.
 		DIEAggregate typeRef = diea.getTypeRef();
-		if (typeRef != null) {
-			function.retval = new DWARFVariable();
-			function.retval.type = dwarfDTM.getDataType(typeRef, dwarfDTM.getVoidType());
-		}
+		DataType formalReturnType = (typeRef != null)
+				? dwarfDTM.getDataType(typeRef, DataType.DEFAULT)
+				: dwarfDTM.getVoidType();
+		dfunc.retval = new DWARFVariable();
+		dfunc.retval.type = formalReturnType;
+
+		boolean formalParamsOnly = false;
+		boolean skipFuncSignature = false;
+		List<Parameter> formalParams = new ArrayList<>();
 
 		for (DebugInfoEntry childEntry : diea.getHeadFragment().getChildren(
 			DWARFTag.DW_TAG_formal_parameter)) {
 			DIEAggregate childDIEA = prog.getAggregate(childEntry);
 
-			DWARFVariable var = processVariable(childDIEA, function, null, -1);
-			if (var != null) {
-				function.params.add(var);
+			Parameter formalParam = createFormalParameter(childDIEA);
+			if (formalParam == null) {
+				skipFuncSignature = true;
+				break;
+			}
+			formalParams.add(formalParam);
+
+			if (!formalParamsOnly) {
+				DWARFVariable var = processVariable(childDIEA, dfunc, null, -1);
+				if (var == null) {
+					// we had an error, can't rely on detailed param data, fallback to
+					// formal params
+					formalParamsOnly = true;
+					dfunc.params.clear();
+				}
+				else {
+					dfunc.params.add(var);
+				}
 			}
 		}
-		function.varArg =
+		dfunc.varArg =
 			!diea.getHeadFragment().getChildren(DWARFTag.DW_TAG_unspecified_parameters).isEmpty();
 
-		processFuncChildren(diea, function);
-		outputFunction(function, diea);
+		processFuncChildren(diea, dfunc);
 
+		Function gfunc = createFunction(dfunc, diea);
+
+		if (gfunc != null) {
+
+			if (formalParams.isEmpty() && dfunc.localVarErrors) {
+				// if there were no defined parameters and we had problems decoding local variables,
+				// don't force the method to have an empty param signature because there are other
+				// issues afoot.
+				skipFuncSignature = true;
+			}
+			else if (formalParams.isEmpty() && diea.getCompilationUnit()
+					.getCompileUnit()
+					.getLanguage() == DWARFSourceLanguage.DW_LANG_Rust) {
+				// if there were no defined parameters and the language is Rust, don't force an
+				// empty param signature. Rust language emit dwarf info without types (signatures)
+				// when used without -g.
+				skipFuncSignature = true;
+			}
+
+			if (skipFuncSignature) {
+				Msg.error(this,
+					"Failed to get function signature information, leaving undefined: " +
+						gfunc.getName() + "@" + gfunc.getEntryPoint());
+				Msg.debug(this, "DIE info: " + diea.toString());
+				return;
+			}
+
+			if (formalParamsOnly) {
+				updateFunctionSignatureWithFormalParams(gfunc, formalParams,
+					formalReturnType, dfunc.varArg, diea);
+			}
+			else {
+				updateFunctionSignatureWithDetailParams(gfunc, dfunc, diea);
+			}
+		}
+
+	}
+
+	private void updateFunctionSignatureWithFormalParams(Function gfunc, List<Parameter> params,
+			DataType returnType, boolean varArgs, DIEAggregate diea) {
+		try {
+			ReturnParameterImpl returnVar = new ReturnParameterImpl(returnType, currentProgram);
+			try {
+				gfunc.setVarArgs(varArgs);
+				gfunc.updateFunction(null, returnVar, params,
+					FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, true, SourceType.IMPORTED);
+			}
+			catch (DuplicateNameException e) {
+				// try again after adjusting param names
+				setUniqueParameterNames(gfunc, params);
+				gfunc.updateFunction(null, returnVar, params,
+					FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, true, SourceType.IMPORTED);
+			}
+		}
+		catch (InvalidInputException | DuplicateNameException e) {
+			Msg.error(this,
+				"Error updating function " + gfunc.getName() + " with formal params at " +
+					gfunc.getEntryPoint().toString() + ": " + e.getMessage());
+			Msg.error(this, "DIE info: " + diea.toString());
+		}
+	}
+
+	private void updateFunctionSignatureWithDetailParams(Function gfunc, DWARFFunction dfunc,
+			DIEAggregate diea) {
+		try {
+			CompilerSpec compilerSpec = currentProgram.getCompilerSpec();
+			PrototypeModel convention = null;
+			Variable returnVariable;
+			List<Parameter> params = new ArrayList<>();
+
+			returnVariable = buildReturnVariable(dfunc.retval);
+			for (int i = 0; i < dfunc.params.size(); ++i) {
+				Parameter curparam = buildParameter(gfunc, i, dfunc.params.get(i), diea);
+				params.add(curparam);
+				if (i == 0 && checkThisParameter(dfunc.params.get(0), diea)) {
+					convention = compilerSpec.matchConvention(GenericCallingConvention.thiscall);
+				}
+			}
+
+			for (int i = 0; i < dfunc.local.size(); ++i) {
+				commitLocal(gfunc, dfunc.local.get(i));
+			}
+
+			if (dfunc.retval != null || params.size() > 0) {
+				// Add the function signature definition into the data type manager
+// TODO:				createFunctionDefinition(dfunc, infopath);
+
+				// NOTE: Storage is computed above for the purpose of identifying
+				// a best fit calling convention.  The commitPrototype method currently
+				// always employs dynamic storage.
+				commitPrototype(gfunc, returnVariable, params, convention);
+				gfunc.setVarArgs(dfunc.varArg);
+			}
+		}
+		catch (InvalidInputException | DuplicateNameException iie) {
+			Msg.error(this, "Error updating function " + dfunc.dni.getName() + " at " +
+				dfunc.address.toString() + ": " + iie.getMessage());
+		}
 	}
 
 	private void processFuncChildren(DIEAggregate diea, DWARFFunction dfunc)
@@ -303,6 +419,19 @@ public class DWARFFunctionImporter {
 
 			}
 		}
+	}
+
+	private Parameter createFormalParameter(DIEAggregate diea) {
+		String name = diea.getString(DWARFAttribute.DW_AT_name, null);
+		DataType dt = dwarfDTM.getDataType(diea.getTypeRef(), dwarfDTM.getVoidType());
+
+		try {
+			return new ParameterImpl(name, dt, currentProgram);
+		}
+		catch (InvalidInputException e) {
+			Msg.debug(this, "Failed to create parameter for " + diea.toString());
+		}
+		return null;
 	}
 
 	/**
@@ -349,6 +478,9 @@ public class DWARFFunctionImporter {
 
 		DWARFLocation topLocation = getTopLocation(locList, funcAddr);
 		if (topLocation == null) {
+			if (dfunc != null) {
+				dfunc.localVarErrors = true;
+			}
 			return null;
 		}
 
@@ -368,12 +500,18 @@ public class DWARFFunctionImporter {
 		catch (DWARFExpressionException | UnsupportedOperationException
 				| IndexOutOfBoundsException ex) {
 			importSummary.exprReadError++;
+			if (dfunc != null) {
+				dfunc.localVarErrors = true;
+			}
 
 			return null;
 		}
 
 		if (exprEvaluator.isDwarfStackValue()) {
 			importSummary.varDWARFExpressionValue++;
+			if (dfunc != null) {
+				dfunc.localVarErrors = true;
+			}
 			return null;
 		}
 		else if (exprEvaluator.useUnknownRegister() && exprEvaluator.isRegisterLocation()) {
@@ -386,6 +524,9 @@ public class DWARFFunctionImporter {
 		}
 		else if (exprEvaluator.useUnknownRegister()) {
 			importSummary.varDynamicRegisterError++;
+			if (dfunc != null) {
+				dfunc.localVarErrors = true;
+			}
 			return null;
 		}
 		else if (exprEvaluator.isStackRelative()) {
@@ -420,6 +561,9 @@ public class DWARFFunctionImporter {
 								" can not fit into specified register " + dvar.reg.getName() +
 								", size=" + dvar.reg.getMinimumByteSize() +
 								", skipping.  DWARF DIE: " + diea.getHexOffset());
+						if (dfunc != null) {
+							dfunc.localVarErrors = true;
+						}
 						return null;
 					}
 
@@ -430,6 +574,9 @@ public class DWARFFunctionImporter {
 				// The DWARF register did not have a mapping to a Ghidra register, so
 				// log it to be displayed in an error summary at end of import phase.
 				importSummary.unknownRegistersEncountered.add(exprEvaluator.getRawLastRegister());
+				if (dfunc != null) {
+					dfunc.localVarErrors = true;
+				}
 				return null;
 			}
 		}
@@ -437,15 +584,14 @@ public class DWARFFunctionImporter {
 			dvar.dni = dvar.dni.replaceType(null /*nothing matches static global var*/);
 			if (res != 0) {
 				// If the expression evaluated to a static address other than '0'
-				Address staticVariableAddresss = toAddr(res);
-				if (variablesProcesesed.contains(staticVariableAddresss)) {
+				Address staticVariableAddress = toAddr(res + prog.getProgramBaseAddressFixup());
+				if (variablesProcesesed.contains(staticVariableAddress)) {
 					return null;
 				}
 
 				boolean external = diea.getBool(DWARFAttribute.DW_AT_external, false);
-				DataType storageType = dwarfDTM.getStorageDataType(diea.getTypeRef(), dvar.type);
 
-				outputGlobal(staticVariableAddresss, storageType, external,
+				outputGlobal(staticVariableAddress, dvar.type, external,
 					DWARFSourceInfo.create(diea), dvar.dni);
 			}
 			else {
@@ -606,7 +752,7 @@ public class DWARFFunctionImporter {
 
 	private final Address toAddr(Number offset) {
 		return currentProgram.getAddressFactory().getDefaultAddressSpace().getAddress(
-			offset.longValue());
+			offset.longValue(), true);
 	}
 
 	/**
@@ -711,6 +857,9 @@ public class DWARFFunctionImporter {
 		if (!(dataDT instanceof Enum || dataDT instanceof AbstractIntegerDataType)) {
 			return false;
 		}
+		if (dataDT instanceof BooleanDataType) {
+			return false;
+		}
 		if (dataDT.getLength() != enumDT.getLength()) {
 			return false;
 		}
@@ -751,25 +900,26 @@ public class DWARFFunctionImporter {
 
 	private Data createVariable(Address address, DataType dataType, DWARFNameInfo dni) {
 		try {
-			if (dataType.getLength() < 0) {
-				Data result = DataUtilities.createData(currentProgram, address, dataType, -1, false,
-					ClearDataMode.CLEAR_ALL_UNDEFINED_CONFLICT_DATA);
-				variablesProcesesed.add(address);
-				return result;
+			String eolComment = null;
+			if (dataType instanceof Dynamic || dataType instanceof FactoryDataType) {
+				eolComment = "Unsupported dynamic data type: " + dataType;
+				dataType = Undefined.getUndefinedDataType(1);
 			}
-			if (isDataTypeCompatibleWithExistingData(dataType, address)) {
-				Data result = DataUtilities.createData(currentProgram, address, dataType, -1, false,
-					ClearDataMode.CLEAR_ALL_CONFLICT_DATA);
-				variablesProcesesed.add(address);
-				return result;
-			}
-			else {
-				Msg.warn(this,
-					"Could not place static variable " +
-						dni.getNamespacePath().asFormattedString() + " : " + dataType + " at " +
-						address + " because existing data type conflicts.");
+			if (!isDataTypeCompatibleWithExistingData(dataType, address)) {
+				appendComment(address, CodeUnit.EOL_COMMENT,
+					"Could not place DWARF static variable " +
+						dni.getNamespacePath().asFormattedString() + " : " + dataType +
+						" because existing data type conflicts.",
+					"\n");
 				return null;
 			}
+			Data result = DataUtilities.createData(currentProgram, address, dataType, -1, false,
+				ClearDataMode.CLEAR_ALL_CONFLICT_DATA);
+			variablesProcesesed.add(address);
+			if (eolComment != null) {
+				appendComment(address, CodeUnit.EOL_COMMENT, eolComment, "\n");
+			}
+			return result;
 		}
 		catch (CodeUnitInsertionException | DataTypeConflictException e) {
 			Msg.error(this, "Error creating data object at " + address, e);
@@ -800,8 +950,7 @@ public class DWARFFunctionImporter {
 		importSummary.globalVarsAdded++;
 
 		if (sourceInfo != null) {
-			currentProgram.getListing().setComment(address, CodeUnit.EOL_COMMENT,
-				sourceInfo.getDescriptionStr());
+			appendComment(address, CodeUnit.EOL_COMMENT, sourceInfo.getDescriptionStr(), "\n");
 
 			if (varData != null) {
 				moveIntoFragment(dni.getName(), varData.getMinAddress(), varData.getMaxAddress(),
@@ -1028,75 +1177,7 @@ public class DWARFFunctionImporter {
 		return false;
 	}
 
-	private void outputFunction(DWARFFunction dfunc, DIEAggregate diea) {
-		try {
-			Function function = createFunction(dfunc);
-			if (function == null) {
-				Msg.error(this, "DWARF DIE: " + diea.getHexOffset());
-				return;
-			}
-
-			DWARFSourceInfo sourceInfo = DWARFSourceInfo.create(diea);
-			if (sourceInfo != null) {
-				// Move the function into the program tree of the file
-				moveIntoFragment(function.getName(), dfunc.address,
-					dfunc.highAddress != null ? dfunc.highAddress : dfunc.address.add(1),
-					sourceInfo.getFilename());
-
-				if (importOptions.isOutputSourceLocationInfo()) {
-					appendComment(dfunc.address, CodeUnit.PLATE_COMMENT,
-						sourceInfo.getDescriptionStr(), "\n");
-				}
-			}
-			if (importOptions.isOutputDIEInfo()) {
-				appendComment(dfunc.address, CodeUnit.PLATE_COMMENT,
-					"DWARF DIE: " + diea.getHexOffset(), "\n");
-			}
-
-			DWARFNameInfo dni = prog.getName(diea);
-			if (dni.isNameModified()) {
-				appendComment(dfunc.address, CodeUnit.PLATE_COMMENT,
-					"Original name: " + dni.getOriginalName(), "\n");
-			}
-
-			CompilerSpec compilerSpec = currentProgram.getCompilerSpec();
-			PrototypeModel convention = null;
-			Variable returnVariable;
-			ArrayList<Parameter> params = new ArrayList<>();
-
-			// boolean specifyStorage = evaluateParameterStorage(dfunc);
-
-			returnVariable = buildReturnVariable(dfunc.retval);
-			for (int i = 0; i < dfunc.params.size(); ++i) {
-				Parameter curparam = buildParameter(function, i, dfunc.params.get(i), diea);
-				params.add(curparam);
-				if (i == 0 && checkThisParameter(dfunc.params.get(0), diea)) {
-					convention = compilerSpec.matchConvention(GenericCallingConvention.thiscall);
-				}
-			}
-
-			for (int i = 0; i < dfunc.local.size(); ++i) {
-				commitLocal(function, dfunc.local.get(i));
-			}
-
-			if (dfunc.retval != null || params.size() > 0) {
-				// Add the function signature definition into the data type manager
-// TODO:				createFunctionDefinition(dfunc, infopath);
-
-				// NOTE: Storage is computed above for the purpose of identifying
-				// a best fit calling convention.  The commitPrototype method currently
-				// always employs dynamic storage.
-				commitPrototype(function, returnVariable, params, convention);
-				function.setVarArgs(dfunc.varArg);
-			}
-		}
-		catch (InvalidInputException | DuplicateNameException iie) {
-			Msg.error(this, "Error updating function " + dfunc.dni.getName() + " at " +
-				dfunc.address.toString() + ": " + iie.getMessage());
-		}
-	}
-
-	private Function createFunction(DWARFFunction dfunc) throws DuplicateNameException {
+	private Function createFunction(DWARFFunction dfunc, DIEAggregate diea) {
 		try {
 			// create a new symbol if one does not exist (symbol table will figure this out)
 			SymbolTable symbolTable = currentProgram.getSymbolTable();
@@ -1127,6 +1208,30 @@ public class DWARFFunctionImporter {
 				function = currentProgram.getFunctionManager().createFunction(null, dfunc.address,
 					new AddressSet(dfunc.address), SourceType.IMPORTED);
 			}
+
+			DWARFSourceInfo sourceInfo = DWARFSourceInfo.create(diea);
+			if (sourceInfo != null) {
+				// Move the function into the program tree of the file
+				moveIntoFragment(function.getName(), dfunc.address,
+					dfunc.highAddress != null ? dfunc.highAddress : dfunc.address.add(1),
+					sourceInfo.getFilename());
+
+				if (importOptions.isOutputSourceLocationInfo()) {
+					appendComment(dfunc.address, CodeUnit.PLATE_COMMENT,
+						sourceInfo.getDescriptionStr(), "\n");
+				}
+			}
+			if (importOptions.isOutputDIEInfo()) {
+				appendComment(dfunc.address, CodeUnit.PLATE_COMMENT,
+					"DWARF DIE: " + diea.getHexOffset(), "\n");
+			}
+
+			DWARFNameInfo dni = prog.getName(diea);
+			if (dni.isNameModified()) {
+				appendComment(dfunc.address, CodeUnit.PLATE_COMMENT,
+					"Original name: " + dni.getOriginalName(), "\n");
+			}
+
 			return function;
 		}
 		catch (OverlappingFunctionException e) {
@@ -1150,14 +1255,14 @@ public class DWARFFunctionImporter {
 	 * @throws InvalidInputException invalid parameter name
 	 * @throws DuplicateNameException (should not occur on non-DB parameter)
 	 */
-	private void setUniqueParameterNames(Function function, Parameter[] parameters)
+	private void setUniqueParameterNames(Function function, List<Parameter> parameters)
 			throws DuplicateNameException, InvalidInputException {
 		SymbolTable symbolTable = currentProgram.getSymbolTable();
 		// Create a set containing all the unique parameter names determined so far so they can
 		// be avoided as additional parameter names are determined.
 		Set<String> namesSoFar = new HashSet<>();
-		for (int ordinal = 0; ordinal < parameters.length; ordinal++) {
-			Parameter parameter = parameters[ordinal];
+		for (int ordinal = 0; ordinal < parameters.size(); ordinal++) {
+			Parameter parameter = parameters.get(ordinal);
 			String baseName = parameter.getName();
 			if (ordinal == 0 && Function.THIS_PARAM_NAME.equals(baseName)) {
 				continue;
@@ -1231,14 +1336,13 @@ public class DWARFFunctionImporter {
 	}
 
 	private void commitPrototype(Function function, Variable returnVariable,
-			ArrayList<Parameter> params, PrototypeModel protoModel)
+			List<Parameter> params, PrototypeModel protoModel)
 			throws InvalidInputException, DuplicateNameException {
 
-		Parameter[] paramarray = new Parameter[params.size()];
-		params.toArray(paramarray);
 		CompilerSpec compilerSpec = currentProgram.getCompilerSpec();
 
 		if (protoModel == null) {
+			Parameter[] paramarray = params.toArray(Parameter[]::new);
 			protoModel = compilerSpec.findBestCallingConvention(paramarray);
 		}
 
@@ -1247,7 +1351,7 @@ public class DWARFFunctionImporter {
 				FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, true, SourceType.IMPORTED);
 		}
 		catch (DuplicateNameException e) {
-			setUniqueParameterNames(function, paramarray);
+			setUniqueParameterNames(function, params);
 			function.updateFunction(protoModel.getName(), returnVariable, params,
 				FunctionUpdateType.DYNAMIC_STORAGE_ALL_PARAMS, true, SourceType.IMPORTED);
 		}
@@ -1359,9 +1463,10 @@ public class DWARFFunctionImporter {
 		public DWARFVariable retval;
 		public boolean isExternal;
 		public long frameBase;
-		public ArrayList<DWARFVariable> params = new ArrayList<>();
-		public ArrayList<DWARFVariable> local = new ArrayList<>();
+		public List<DWARFVariable> params = new ArrayList<>();
+		public List<DWARFVariable> local = new ArrayList<>();
 		public boolean varArg;
+		public boolean localVarErrors;	// set to true if problem w/local var decoding
 
 		public DWARFFunction(DWARFNameInfo dni) {
 			this.dni = dni;

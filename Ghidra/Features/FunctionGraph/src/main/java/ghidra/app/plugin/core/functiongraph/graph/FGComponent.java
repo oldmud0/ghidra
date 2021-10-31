@@ -24,7 +24,6 @@ import org.jdom.Element;
 import edu.uci.ics.jung.algorithms.layout.Layout;
 import edu.uci.ics.jung.visualization.RenderContext;
 import edu.uci.ics.jung.visualization.picking.PickedState;
-import edu.uci.ics.jung.visualization.renderers.DefaultEdgeLabelRenderer;
 import edu.uci.ics.jung.visualization.renderers.Renderer;
 import edu.uci.ics.jung.visualization.util.Caching;
 import ghidra.app.plugin.core.functiongraph.graph.jung.renderer.FGEdgePaintTransformer;
@@ -37,6 +36,8 @@ import ghidra.graph.viewer.*;
 import ghidra.graph.viewer.layout.LayoutListener.ChangeType;
 import ghidra.graph.viewer.layout.LayoutProvider;
 import ghidra.graph.viewer.layout.VisualGraphLayout;
+import ghidra.graph.viewer.options.VisualGraphOptions;
+import ghidra.graph.viewer.renderer.VisualGraphEdgeLabelRenderer;
 import ghidra.program.model.listing.Function;
 import ghidra.program.util.ProgramLocation;
 import ghidra.util.SystemUtilities;
@@ -64,6 +65,8 @@ public class FGComponent extends GraphComponent<FGVertex, FGEdge, FunctionGraph>
 		// Note: we cannot call super here, as we need to set our variables below before 
 		//       the base class builds.
 		// super(data.getFunctionGraph());
+
+		setGraphOptions(functionGraphView.getController().getFunctionGraphOptions());
 
 		setGraph(data.getFunctionGraph());
 
@@ -208,17 +211,30 @@ public class FGComponent extends GraphComponent<FGVertex, FGEdge, FunctionGraph>
 		// edge label rendering
 		com.google.common.base.Function<FGEdge, String> edgeLabelTransformer = e -> e.getLabel();
 		renderContext.setEdgeLabelTransformer(edgeLabelTransformer);
-		DefaultEdgeLabelRenderer edgeLabelRenderer = new DefaultEdgeLabelRenderer(Color.ORANGE);
+
+		// note: this label renderer is the stamp for the label; we use another edge label 
+		//       renderer inside of the VisualGraphRenderer
+		VisualGraphEdgeLabelRenderer edgeLabelRenderer =
+			new VisualGraphEdgeLabelRenderer(Color.BLACK);
+		edgeLabelRenderer.setNonPickedForegroundColor(Color.LIGHT_GRAY);
 		edgeLabelRenderer.setRotateEdgeLabels(false);
 		renderContext.setEdgeLabelRenderer(edgeLabelRenderer);
 
-		// Give user notice when seeing the graph for a non-function.
-		Function function = functionGraphData.getFunction();
-		if (function instanceof UndefinedFunction) {
-			viewer.setBackground(UNDEFINED_FUNCTION_COLOR);
-		}
-		else {
-			viewer.setBackground(Color.WHITE);
+		viewer.setGraphOptions(options);
+		Color bgColor = options.getGraphBackgroundColor();
+		if (bgColor.equals(VisualGraphOptions.DEFAULT_GRAPH_BACKGROUND_COLOR)) {
+
+			// Give user notice when seeing the graph for a non-function (such as an undefined 
+			// function), as this is typical for Ghidra UI widgets.   
+			// Don't do this if the user has manually set the background color (this would require 
+			// another option).
+			Function function = functionGraphData.getFunction();
+			if (function instanceof UndefinedFunction) {
+				viewer.setBackground(UNDEFINED_FUNCTION_COLOR);
+			}
+			else {
+				viewer.setBackground(Color.WHITE);
+			}
 		}
 
 		return viewer;
@@ -242,6 +258,8 @@ public class FGComponent extends GraphComponent<FGVertex, FGEdge, FunctionGraph>
 		PickedState<FGVertex> pickedVertexState = viewer.getPickedVertexState();
 		renderContext.setVertexFillPaintTransformer(new FGVertexPickableBackgroundPaintTransformer(
 			pickedVertexState, Color.YELLOW, START_COLOR, END_COLOR));
+
+		viewer.setGraphOptions(options);
 
 		return viewer;
 	}
@@ -269,7 +287,7 @@ public class FGComponent extends GraphComponent<FGVertex, FGEdge, FunctionGraph>
 //==================================================================================================
 
 	public FunctionGraphOptions getFucntionGraphOptions() {
-		return functionGraphView.getController().getFunctionGraphOptions();
+		return (FunctionGraphOptions) options;
 	}
 
 	public void ensureCursorVisible(FGVertex vertex) {

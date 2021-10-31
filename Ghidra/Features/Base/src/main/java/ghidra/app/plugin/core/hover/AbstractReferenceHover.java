@@ -15,6 +15,8 @@
  */
 package ghidra.app.plugin.core.hover;
 
+import static ghidra.util.HTMLUtilities.*;
+
 import java.awt.*;
 
 import javax.swing.JComponent;
@@ -24,7 +26,7 @@ import docking.widgets.fieldpanel.field.Field;
 import docking.widgets.fieldpanel.support.FieldLocation;
 import ghidra.app.plugin.core.gotoquery.GoToHelper;
 import ghidra.app.services.CodeFormatService;
-import ghidra.app.util.ToolTipUtils;
+import ghidra.app.util.*;
 import ghidra.app.util.viewer.listingpanel.ListingPanel;
 import ghidra.framework.options.Options;
 import ghidra.framework.plugintool.PluginTool;
@@ -32,6 +34,8 @@ import ghidra.program.model.address.Address;
 import ghidra.program.model.listing.*;
 import ghidra.program.model.symbol.*;
 import ghidra.program.util.*;
+import ghidra.util.HTMLUtilities;
+import ghidra.util.HelpLocation;
 import ghidra.util.bean.opteditor.OptionsVetoException;
 
 /**
@@ -39,15 +43,14 @@ import ghidra.util.bean.opteditor.OptionsVetoException;
  */
 public abstract class AbstractReferenceHover extends AbstractConfigurableHover {
 
-	public static final int WINDOW_OFFSET = 50;
+	private static final int WINDOW_OFFSET = 50;
+	private static final Color BACKGROUND_COLOR = new Color(255, 255, 230);
 
-	protected static final Color BACKGROUND_COLOR = new Color(255, 255, 230);
-
-	protected CodeFormatService codeFormatService;
-	protected ListingPanel panel;
-	protected JToolTip toolTip;
-	protected ProgramLocation previewLocation;
-	protected GoToHelper gotoHelper;
+	private CodeFormatService codeFormatService;
+	private ListingPanel panel;
+	private JToolTip toolTip;
+	private ProgramLocation previewLocation;
+	private GoToHelper gotoHelper;
 
 	public AbstractReferenceHover(PluginTool tool, int priority) {
 		this(tool, null, priority);
@@ -79,23 +82,56 @@ public abstract class AbstractReferenceHover extends AbstractConfigurableHover {
 	}
 
 	@Override
-	public void setOptions(Options options, String name) {
-		enabled = options.getBoolean(name, true);
-		int dialogWidth = options.getInt(name + Options.DELIMITER + "Dialog Width", 600);
-		if (dialogWidth <= 0) {
-			throw new OptionsVetoException(
-				"Reference Code Viewer Dialog Width must be greater than 0");
+	public void initializeOptions() {
+
+		options = tool.getOptions(getOptionsCategory());
+
+		options.setOptionsHelpLocation(new HelpLocation(HelpTopics.CODE_BROWSER, "MouseHover"));
+		HelpLocation help = new HelpLocation(HelpTopics.CODE_BROWSER, "ReferenceHover");
+
+		String hoverName = getName();
+		options.getOptions(hoverName).setOptionsHelpLocation(help);
+
+		options.registerOption(hoverName, true, null, getDescription());
+		enabled = options.getBoolean(hoverName, true);
+
+		options.registerOption(hoverName + Options.DELIMITER + "Dialog Height", 400, help,
+			"Height of the popup window");
+		options.registerOption(hoverName + Options.DELIMITER + "Dialog Width", 600, help,
+			"Width of the popup window");
+
+		options.addOptionsChangeListener(this);
+	}
+
+	@Override
+	public void setOptions(Options options, String optionName) {
+
+		String hoverName = getName();
+		if (optionName.equals(hoverName)) {
+			enabled = options.getBoolean(hoverName, true);
+			return;
 		}
 
-		int dialogHeight = options.getInt(name + Options.DELIMITER + "Dialog Height", 400);
-		if (dialogHeight <= 0) {
-			throw new OptionsVetoException(
-				"Reference Code Viewer Dialog Height must be greater than 0");
-		}
+		String widthOptionName = optionName + Options.DELIMITER + "Dialog Width";
+		String heightOptionName = optionName + Options.DELIMITER + "Dialog Height";
 
-		Dimension d = new Dimension(dialogWidth, dialogHeight);
-		if (panel != null) {
-			panel.setPreferredSize(d);
+		if (optionName.equals(widthOptionName) ||
+			optionName.equals(heightOptionName)) {
+			int dialogWidth = options.getInt(widthOptionName, 600);
+			if (dialogWidth <= 0) {
+				throw new OptionsVetoException(
+					"Reference Code Viewer Dialog Width must be greater than 0");
+			}
+			int dialogHeight = options.getInt(heightOptionName, 400);
+			if (dialogHeight <= 0) {
+				throw new OptionsVetoException(
+					"Reference Code Viewer Dialog Height must be greater than 0");
+			}
+
+			Dimension d = new Dimension(dialogWidth, dialogHeight);
+			if (panel != null) {
+				panel.setPreferredSize(d);
+			}
 		}
 	}
 
@@ -117,10 +153,18 @@ public abstract class AbstractReferenceHover extends AbstractConfigurableHover {
 			return;
 		}
 
+		toolTip = new JToolTip();
+
 		panel = new ListingPanel(codeFormatService.getFormatManager());// share the manager from the code viewer
 		panel.setTextBackgroundColor(BACKGROUND_COLOR);
 
-		toolTip = new JToolTip();
+		String name = getName();
+		String widthOptionName = name + Options.DELIMITER + "Dialog Width";
+		String heightOptionName = name + Options.DELIMITER + "Dialog Height";
+		int dialogWidth = options.getInt(widthOptionName, 600);
+		int dialogHeight = options.getInt(heightOptionName, 400);
+		Dimension d = new Dimension(dialogWidth, dialogHeight);
+		panel.setPreferredSize(d);
 	}
 
 	@Override
@@ -131,7 +175,6 @@ public abstract class AbstractReferenceHover extends AbstractConfigurableHover {
 		if (!enabled || programLocation == null || panel == null) {
 			return null;
 		}
-		panel.setProgram(program);
 
 		Address refAddr = programLocation.getRefAddress();
 		if (refAddr != null && refAddr.isExternalAddress()) {
@@ -140,22 +183,24 @@ public abstract class AbstractReferenceHover extends AbstractConfigurableHover {
 
 		previewLocation =
 			getPreviewLocation(program, programLocation, programLocation.getRefAddress());
+		if (previewLocation == null) {
+			return null;
+		}
 
-		if (previewLocation != null) {
-			boolean toolTipForLocation = panel.goTo(previewLocation);
-
-			// only continue if there was a valid location to go to
-			if (toolTipForLocation) {
-
-				Rectangle bounds = panel.getBounds();
-				bounds.x = WINDOW_OFFSET;
-				bounds.y = WINDOW_OFFSET;
-				panel.setBounds(bounds);
-				return panel;
-			}
+		panel.setProgram(program); // the program must be set in order for the goto to work
+		boolean validLocation = panel.goTo(previewLocation);
+		if (validLocation) {
+			Rectangle bounds = panel.getBounds();
+			bounds.x = WINDOW_OFFSET;
+			bounds.y = WINDOW_OFFSET;
+			panel.setBounds(bounds);
+			return panel;
 		}
 		panel.setProgram(null);
-		return null;
+
+		// At this point we have a program location, but we could not go there.  This can happen
+		// if the location is not in memory.
+		return createOutOfMemoryToolTipComponent(previewLocation);
 	}
 
 	protected JComponent createExternalToolTipComponent(Program program, Address extAddr) {
@@ -180,6 +225,60 @@ public abstract class AbstractReferenceHover extends AbstractConfigurableHover {
 		}
 
 		toolTip.setTipText(ToolTipUtils.getToolTipText(extLoc, true));
+		return toolTip;
+	}
+
+	protected JComponent createOutOfMemoryToolTipComponent(ProgramLocation location) {
+
+		/*
+		 		Format
+		 	
+		 	Address: ram:1234
+		 	Address not in memory
+		 	
+		 	
+		 		Or, when multiple symbols at destination
+		 		
+		 		
+		 	Address: ram:1234
+		 	Symbols (3): 
+		 		foo
+		 		bar
+		 		baz
+		 	Address not in memory
+		 	
+		 */
+
+		String newline = HTMLUtilities.HTML_NEW_LINE;
+		StringBuilder buffy = new StringBuilder(HTML);
+		buffy.append("Address: ");
+		String addressString = location.getAddress().toString(true, false);
+		addressString = HTMLUtilities.friendlyEncodeHTML(addressString);
+		buffy.append(addressString);
+		buffy.append(newline);
+
+		Program p = location.getProgram();
+		SymbolTable st = p.getSymbolTable();
+		Symbol[] symbols = st.getSymbols(location.getAddress());
+
+		if (symbols.length > 1) {
+			buffy.append("Symbols (").append(symbols.length).append("): ").append(newline);
+			String pad = HTMLUtilities.spaces(4);
+			SymbolInspector inspector = new SymbolInspector(tool, null);
+			for (Symbol s : symbols) {
+				ColorAndStyle style = inspector.getColorAndStyle(s);
+				String name = s.getName(true);
+				name = pad + HTMLUtilities.friendlyEncodeHTML(name);
+				String html = style.toHtml(name);
+				buffy.append(html).append(newline);
+			}
+		}
+
+		String message = "Address not in memory";
+		message = HTMLUtilities.italic(message);
+		message = HTMLUtilities.colorString(Color.GRAY, message);
+		buffy.append(message);
+		toolTip.setTipText(buffy.toString());
 		return toolTip;
 	}
 

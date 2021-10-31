@@ -36,7 +36,7 @@ public class ExpandAllDataAction extends ProgramLocationContextAction {
 	private CodeViewerProvider provider;
 
 	public ExpandAllDataAction(CodeViewerProvider provider) {
-		super("Expand All Data", provider.getName());
+		super("Expand All Data", provider.getOwner());
 		this.provider = provider;
 
 		setPopupMenuData(new MenuData(new String[] { "Expand All Data" }, null, "Structure"));
@@ -45,6 +45,9 @@ public class ExpandAllDataAction extends ProgramLocationContextAction {
 		setHelpLocation(new HelpLocation("CodeBrowserPlugin", "ExpandCollapseActions"));
 
 		setEnabled(true);
+
+		// make sure the action is in all windows that can provide the needed context
+		addToWindowWhen(ProgramLocationActionContext.class);
 	}
 
 	@Override

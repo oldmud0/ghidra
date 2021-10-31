@@ -23,6 +23,7 @@ import java.util.function.Supplier;
 
 import javax.swing.*;
 
+import docking.widgets.label.GDLabel;
 import edu.uci.ics.jung.visualization.RenderContext;
 import edu.uci.ics.jung.visualization.VisualizationViewer;
 import edu.uci.ics.jung.visualization.control.ScalingControl;
@@ -30,7 +31,6 @@ import ghidra.graph.VisualGraph;
 import ghidra.graph.viewer.event.mouse.VertexTooltipProvider;
 import ghidra.graph.viewer.event.mouse.VisualGraphMousePlugin;
 import ghidra.graph.viewer.layout.LayoutProvider;
-import ghidra.graph.viewer.options.VisualGraphOptions;
 import ghidra.graph.viewer.vertex.VertexClickListener;
 import ghidra.graph.viewer.vertex.VertexFocusListener;
 
@@ -159,6 +159,15 @@ public class VisualGraphView<V extends VisualVertex,
 	}
 
 	/**
+	 * Called when the options used by this graph view have changed
+	 */
+	public void optionsChanged() {
+		if (graphComponent != null) { // will be null after being closed
+			graphComponent.optionsChanged();
+		}
+	}
+
+	/**
 	 * Sets the given layout provider, <b>but does not actually perform a layout</b>.
 	 * @param newLayoutProvider the new provider
 	 */
@@ -200,7 +209,6 @@ public class VisualGraphView<V extends VisualVertex,
 
 	protected void installGraphViewer() {
 		GraphComponent<V, E, G> newGraphComponent = new GraphComponent<>(graph);
-		newGraphComponent.setGraphOptions(new VisualGraphOptions());
 		setGraphComponent(newGraphComponent);
 	}
 
@@ -341,7 +349,7 @@ public class VisualGraphView<V extends VisualVertex,
 
 		viewContentPanel.removeAll();
 		viewContentPanel.paintImmediately(viewContentPanel.getBounds());
-		JLabel messageLabel = new JLabel(errorMessage);
+		JLabel messageLabel = new GDLabel(errorMessage);
 		Font font = messageLabel.getFont();
 		messageLabel.setFont(font.deriveFont(22f)); // make a bit bigger for readability
 		messageLabel.setHorizontalAlignment(SwingConstants.CENTER);
@@ -521,7 +529,7 @@ public class VisualGraphView<V extends VisualVertex,
 	public MouseEvent translateMouseEventFromVertexToViewSpace(V v, MouseEvent e) {
 		Point viewerPoint = translatePointFromVertexToViewSpace(v, e.getPoint());
 		VisualizationViewer<V, E> newSource = getPrimaryGraphViewer();
-		return new MouseEvent(newSource, e.getID(), e.getWhen(), e.getModifiers(),
+		return new MouseEvent(newSource, e.getID(), e.getWhen(), e.getModifiersEx(),
 			(int) viewerPoint.getX(), (int) viewerPoint.getY(), e.getClickCount(),
 			e.isPopupTrigger(), e.getButton());
 	}

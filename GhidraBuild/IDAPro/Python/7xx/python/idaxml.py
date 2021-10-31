@@ -1,3 +1,18 @@
+## ###
+#  IP: GHIDRA
+# 
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#  
+#       http://www.apache.org/licenses/LICENSE-2.0
+#  
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+##
 #---------------------------------------------------------------------
 # idaxml.py - IDA XML classes
 #---------------------------------------------------------------------
@@ -33,6 +48,7 @@ import idautils
 import idc
 import datetime
 import os
+import sys
 import time
 from xml.etree import cElementTree
 
@@ -631,7 +647,7 @@ class XmlExporter(IdaXml):
         # tag_remove seems to be losing last character
         # work around is to add a space
         cmt_text = ida_lines.tag_remove(cmt + ' ')
-        self.write_text(cmt_text)
+        self.write_text(cmt_text.decode('utf-8'))
         self.end_element(COMMENT, False)
 
 
@@ -1192,9 +1208,9 @@ class XmlExporter(IdaXml):
             elif idc.is_code(f) == True:
                 insn = ida_ua.insn_t()
                 ida_ua.decode_insn(insn, addr)
-                target = insn.ops[op].value - ri.tdelta + ri.base
+                target = (insn.ops[op].value - ri.tdelta + ri.base) & ((1 << 64) - 1)
             elif idc.is_data(f) == True:
-                target = self.get_data_value(addr) - ri.tdelta + ri.base;
+                target = (self.get_data_value(addr) - ri.tdelta + ri.base) & ((1 << 64) - 1)
             else:
                 return
         else:
@@ -1641,8 +1657,10 @@ class XmlExporter(IdaXml):
             cmt: String containing type info.
         """
         # older versions of IDAPython returned a '\n' at end of cmt
-        while cmt[-1] == '\n':
-            cmt = cmt[:-1]
+        if(len(cmt) > 0):
+            while cmt[-1] == '\n':
+                cmt = cmt[:-1]
+        
         self.write_comment_element(TYPEINFO_CMT, cmt)
         
 
@@ -2377,7 +2395,7 @@ class XmlImporter(IdaXml):
             # overlayed addresses not currently handled
             return BADADDR
         elif ':' in addrstr:
-            [segstr, offset_str] = string.split(addrstr,':')
+            [segstr, offset_str] = str.split(addrstr,':')
             offset = int(offset_str,16)
             if self.is_int(segstr) == True:
                 sgmt = int(segstr,16)
@@ -3093,11 +3111,11 @@ class XmlImporter(IdaXml):
         """
         regcmt = member.find(REGULAR_CMT)
         if regcmt != None:
-            idc.set_member_cmt(mbr, regcmt.text, False)
+            ida_struct.set_member_cmt(mbr, regcmt.text, False)
             self.update_counter(MEMBER + ':' + REGULAR_CMT)
         rptcmt = member.find(REPEATABLE_CMT)
         if rptcmt != None:
-            idc.set_member_cmt(mbr, rptcmt.text, True)
+            ida_struct.set_member_cmt(mbr, rptcmt.text, True)
             self.update_counter(MEMBER + ':' + REPEATABLE_CMT)
         
 
@@ -3221,7 +3239,7 @@ class XmlImporter(IdaXml):
             idc.warning(msg)
             return
         elif ':' in addrstr:
-            [seg_str, offset_str] = string.split(addrstr,':')
+            [seg_str, offset_str] = str.split(addrstr,':')
             offset = int(offset_str, 16)
             if self.is_int(seg_str):
                 base = int(seg_str, 16)
@@ -3443,7 +3461,7 @@ class XmlImporter(IdaXml):
             if self.has_attribute(structure, NAMESPACE) == False:
                 return
             namespace = self.get_attribute(structure, NAMESPACE)
-            name = namspace + '__' + name
+            name = namespace + '__' + name
             name.replace('/','_')
             name.replace('.','_')
             dtyp = idc.get_struc_id(name)
@@ -3513,7 +3531,7 @@ class XmlImporter(IdaXml):
             if self.has_attribute(union, NAMESPACE) == False:
                 return
             namespace = self.get_attribute(union, NAMESPACE)
-            name = namspace + '__' + name
+            name = namespace + '__' + name
             name.replace('/','_')
             name.replace('.','_')
             dtyp = idc.get_struc_id(name)

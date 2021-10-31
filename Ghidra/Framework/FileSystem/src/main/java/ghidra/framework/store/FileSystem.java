@@ -143,7 +143,6 @@ public interface FileSystem {
 	 * @param parentPath folder path of parent
 	 * @param name new database name
 	 * @param fileID file ID to be associated with new database or null
-	 * @param bufferFile data source
 	 * @param contentType application defined content type
 	 * @param bufferSize buffer size.  If copying an existing BufferFile, the buffer 
 	 * size must be the same as the source file.
@@ -164,7 +163,7 @@ public interface FileSystem {
 	 * Creates a new empty data file within the specified parent folder.
 	 * @param parentPath folder path of parent
 	 * @param name new data file name
-	 * @param inputStream source data
+	 * @param istream source data
 	 * @param comment version comment (used for versioned file system only)
 	 * @param contentType application defined content type
 	 * @param monitor progress monitor (used for cancel support, 
@@ -204,7 +203,7 @@ public interface FileSystem {
 	 * @param folderPath path of folder to be deleted
 	 * @throws FolderNotEmptyException Thrown if the folder is not empty.
 	 * @throws FileNotFoundException if there is no folder with the given path name.
-	 * @throws IOException if error occured during delete.
+	 * @throws IOException if error occurred during delete.
 	 */
 	public void deleteFolder(String folderPath) throws IOException;
 
@@ -254,7 +253,7 @@ public interface FileSystem {
 
 	/**
 	 * Adds the given listener to be notified of file system changes.
-	 * @param listener the listner to be added.
+	 * @param listener the listener to be added.
 	 */
 	public void addFileSystemListener(FileSystemListener listener);
 
@@ -286,7 +285,7 @@ public interface FileSystem {
 	public boolean isShared();
 
 	/**
-	 * Cleanup & release resources
+	 * Cleanup and release resources
 	 */
 	public void dispose();
 

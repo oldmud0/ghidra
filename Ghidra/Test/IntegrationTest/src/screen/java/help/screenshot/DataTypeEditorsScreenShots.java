@@ -227,9 +227,9 @@ public class DataTypeEditorsScreenShots extends GhidraScreenShotGenerator {
 	}
 
 	@Test
-	public void testStructureEditorAligned() {
+	public void testStructureEditorPacked() {
 
-		createAlignedDetailedStructure(0x40d2b8, false);
+		createDetailedStructure(0x40d2b8, true, false);
 
 		goToListing(0x40d2b8, true);
 
@@ -241,13 +241,36 @@ public class DataTypeEditorsScreenShots extends GhidraScreenShotGenerator {
 	@Test
 	public void testStructureEditorWithFlexArray() {
 
-		createAlignedDetailedStructure(0x40d2b8, true);
+		createDetailedStructure(0x40d2b8, true, true);
 
 		goToListing(0x40d2b8, true);
 
 		performAction("Edit Data Type", "DataPlugin", true);
 
 		captureProvider(StructureEditorProvider.class);
+	}
+
+	@Test
+	public void testStructureEditBitfield() {
+
+		createDetailedStructure(0x40d2b8, false, true);
+
+		goToListing(0x40d2b8, true);
+
+		performAction("Edit Data Type", "DataPlugin", true);
+
+		ComponentProvider structureEditor = getProvider(StructureEditorProvider.class);
+
+		// get structure table and select a row
+		CompositeEditorPanel editorPanel =
+			(CompositeEditorPanel) getInstanceField("editorPanel", structureEditor);
+		JTable table = editorPanel.getTable();
+		selectRow(table, 4); // select byte:3 bitfield
+
+		performAction("Editor: Edit Bitfield", "DataTypeManagerPlugin", structureEditor, false);
+		waitForSwing();
+
+		captureDialog();
 	}
 
 	@Test
@@ -262,9 +285,9 @@ public class DataTypeEditorsScreenShots extends GhidraScreenShotGenerator {
 	}
 
 	@Test
-	public void testUnionEditorAligned() {
+	public void testUnionEditorPacked() {
 
-		createAlignedUnion(0x40d2b8);
+		createPackedUnion(0x40d2b8);
 
 		goToListing(0x40d2b8, true);
 		performAction("Edit Data Type", "DataPlugin", true);
@@ -276,18 +299,18 @@ public class DataTypeEditorsScreenShots extends GhidraScreenShotGenerator {
 
 		goToListing(address);
 
-		StructureDataType struct = new StructureDataType("MyUnalignedStruct", 0);
-		struct.add(new ByteDataType(), "myByteElement", "unaligned byte");
+		StructureDataType struct = new StructureDataType("MyNonPackedStruct", 0);
+		struct.add(new ByteDataType(), "myByteElement", "non-packed byte");
 		struct.add(new ByteDataType(), "", "undefined element");
-		struct.add(new WordDataType(), "myWordElement", "unaligned word");
-		struct.add(new ByteDataType(), "myByteElement2", "another unaligned byte");
-		struct.add(new DWordDataType(), "myDWordElement", "unaligned dword");
+		struct.add(new WordDataType(), "myWordElement", "non-packed word");
+		struct.add(new ByteDataType(), "myByteElement2", "another non-packed byte");
+		struct.add(new DWordDataType(), "myDWordElement", "non-packed dword");
 		if (includeFlexArray) {
 			struct.setFlexibleArrayComponent(CharDataType.dataType, "flex",
 				"unsized flexible array");
 		}
 		struct.clearComponent(1);
-		struct.setDescription("This is an example of an unaligned structure " +
+		struct.setDescription("This is an example of an non-packed structure " +
 			(includeFlexArray ? "with a flexible char array" : "of size 9") + ".");
 
 		CreateDataCmd createDataCmd = new CreateDataCmd(addr(address), struct);
@@ -295,26 +318,38 @@ public class DataTypeEditorsScreenShots extends GhidraScreenShotGenerator {
 		waitForBusyTool(tool);
 	}
 
-	private void createAlignedDetailedStructure(long address, boolean includeFlexArray) {
+	private void createDetailedStructure(long address, boolean packed,
+			boolean includeBitFieldsAndFlexArray) {
 
 		goToListing(address);
 
-		StructureDataType struct = new StructureDataType("MyAlignedStruct", 0);
+		StructureDataType struct = new StructureDataType("MyPackedStruct", 0);
+		struct.setPackingEnabled(true); // allow proper default packing
 		struct.add(new ByteDataType(), "myByteElement", "alignment 1");
 		struct.add(new ByteDataType(), "", "This is my undefined element");
 		struct.add(new WordDataType(), "myWordElement", "alignment 2");
+		if (includeBitFieldsAndFlexArray) {
+			try {
+				struct.addBitField(ByteDataType.dataType, 1, "myBitField1", "alignment 1");
+				struct.addBitField(ByteDataType.dataType, 2, "myBitField2", "alignment 1");
+				struct.addBitField(ByteDataType.dataType, 3, "myBitField3", "alignment 1");
+			}
+			catch (InvalidDataTypeException e) {
+				failWithException("Unexpected Error", e);
+			}
+		}
 		struct.add(new ByteDataType(), "myByteElement2", "alignment 1");
 		struct.add(new DWordDataType(), "myDWordElement", "alignment 4");
-		if (includeFlexArray) {
+		if (includeBitFieldsAndFlexArray) {
 			struct.setFlexibleArrayComponent(CharDataType.dataType, "flex",
 				"unsized flexible array");
 		}
 		struct.clearComponent(1);
-		struct.setDescription(
-			"Members internally aligned " + (includeFlexArray ? "with a flexible char array"
+		struct.setDescription("Members packed " +
+			(includeBitFieldsAndFlexArray ? "with bitfields and a flexible char array"
 					: "according to their alignment size") +
-				". ");
-		struct.setInternallyAligned(true);
+			". ");
+		struct.setPackingEnabled(packed);
 
 		CreateDataCmd createDataCmd = new CreateDataCmd(addr(address), struct);
 		tool.execute(createDataCmd, program);
@@ -326,28 +361,28 @@ public class DataTypeEditorsScreenShots extends GhidraScreenShotGenerator {
 		goToListing(address);
 
 		UnionDataType union = new UnionDataType("MyUnion");
-		union.add(new ByteDataType(), "myByteElement", "unaligned byte");
-		union.add(new WordDataType(), "myWordElement", "unaligned word");
-		union.add(new DWordDataType(), "myDWordElement", "unaligned dword");
-		union.add(new QWordDataType(), "myQWordElement", "unaligned qword");
-		union.setDescription("This is an example of an unaligned union.");
+		union.add(new ByteDataType(), "myByteElement", "non-packed byte");
+		union.add(new WordDataType(), "myWordElement", "non-packed word");
+		union.add(new DWordDataType(), "myDWordElement", "non-packed dword");
+		union.add(new QWordDataType(), "myQWordElement", "non-packed qword");
+		union.setDescription("This is an example of an non-packed union.");
 
 		CreateDataCmd createDataCmd = new CreateDataCmd(addr(address), union);
 		tool.execute(createDataCmd, program);
 		waitForBusyTool(tool);
 	}
 
-	private void createAlignedUnion(long address) {
+	private void createPackedUnion(long address) {
 
 		goToListing(address);
 
 		UnionDataType union = new UnionDataType("MyUnion");
-		union.add(new ByteDataType(), "myByteElement", "aligned byte");
-		union.add(new WordDataType(), "myWordElement", "aligned word");
-		union.add(new DWordDataType(), "myDWordElement", "aligned dword");
-		union.add(new QWordDataType(), "myQWordElement", "aligned qword");
-		union.setDescription("This is an example of an aligned union.");
-		union.setInternallyAligned(true);
+		union.add(new ByteDataType(), "myByteElement", "packed byte");
+		union.add(new WordDataType(), "myWordElement", "packed word");
+		union.add(new DWordDataType(), "myDWordElement", "packed dword");
+		union.add(new QWordDataType(), "myQWordElement", "packed qword");
+		union.setDescription("This is an example of an packed union.");
+		union.setPackingEnabled(true);
 
 		CreateDataCmd createDataCmd = new CreateDataCmd(addr(address), union);
 		tool.execute(createDataCmd, program);

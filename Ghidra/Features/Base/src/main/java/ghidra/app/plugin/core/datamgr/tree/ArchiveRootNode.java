@@ -19,29 +19,41 @@ import java.util.*;
 
 import javax.swing.Icon;
 
-import docking.widgets.tree.*;
+import docking.widgets.tree.GTreeNode;
 import ghidra.app.plugin.core.datamgr.archive.*;
 import ghidra.app.plugin.core.datamgr.util.DataTypeUtils;
 import ghidra.program.model.data.Category;
 import ghidra.program.model.data.DataTypeManager;
 import ghidra.util.exception.AssertException;
 
-public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, DataTypeTreeNode {
+public class ArchiveRootNode extends DataTypeTreeNode {
 	private static final String NAME = "Data Types";
-
-	private GTree tree;
 
 	private final DataTypeManagerHandler archiveManager;
 	private RootNodeListener archiveListener;
 
+	private ArrayPointerFilterState filterState = new ArrayPointerFilterState();
+
 	ArchiveRootNode(DataTypeManagerHandler archiveManager) {
 		this.archiveManager = archiveManager;
+		init();
+	}
+
+	private void init() {
 		archiveListener = new RootNodeListener();
 		archiveManager.addArchiveManagerListener(archiveListener);
 	}
 
 	public DataTypeManagerHandler getArchiveHandler() {
 		return archiveManager;
+	}
+
+	// override clone to install the needed listeners
+	@Override
+	public GTreeNode clone() throws CloneNotSupportedException {
+		ArchiveRootNode clone = (ArchiveRootNode) super.clone();
+		clone.init();
+		return clone;
 	}
 
 	@Override
@@ -76,21 +88,22 @@ public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, Dat
 	}
 
 	// a factory method to isolate non-OO inheritance checks
-	private static final GTreeNode createArchiveNode(Archive archive) {
+	private static final GTreeNode createArchiveNode(Archive archive,
+			ArrayPointerFilterState filterState) {
 		if (archive instanceof FileArchive) {
-			return new FileArchiveNode((FileArchive) archive);
+			return new FileArchiveNode((FileArchive) archive, filterState);
 		}
 		else if (archive instanceof ProjectArchive) {
-			return new ProjectArchiveNode((ProjectArchive) archive);
+			return new ProjectArchiveNode((ProjectArchive) archive, filterState);
 		}
 		else if (archive instanceof InvalidFileArchive) {
 			return new InvalidArchiveNode((InvalidFileArchive) archive);
 		}
 		else if (archive instanceof ProgramArchive) {
-			return new ProgramArchiveNode((ProgramArchive) archive);
+			return new ProgramArchiveNode((ProgramArchive) archive, filterState);
 		}
 		else if (archive instanceof BuiltInArchive) {
-			return new BuiltInArchiveNode((BuiltInArchive) archive);
+			return new BuiltInArchiveNode((BuiltInArchive) archive, filterState);
 		}
 		return null;
 	}
@@ -107,13 +120,6 @@ public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, Dat
 	@Override
 	public boolean canPaste(List<GTreeNode> pastedNodes) {
 		return false;
-		// DT problem with copying archives, use saveAs for now
-//		for (GTreeNode node : pastedNodes) {
-//			if ( !(node instanceof ArchiveNode) ) {
-//				return false;
-//			}
-//		}
-//		return true;
 	}
 
 	@Override
@@ -137,12 +143,12 @@ public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, Dat
 	}
 
 	@Override
-	public boolean isSystemNode() {
-		return true;
+	public boolean canDelete() {
+		return false;
 	}
 
 	public CategoryNode findCategoryNode(Category category) {
-		Iterator<GTreeNode> iterator = getAllChildren().iterator();
+		Iterator<GTreeNode> iterator = getChildren().iterator();
 		while (iterator.hasNext()) {
 			GTreeNode node = iterator.next();
 			ArchiveNode archiveNode = (ArchiveNode) node;
@@ -155,7 +161,7 @@ public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, Dat
 	}
 
 	public ArchiveNode getNodeForManager(DataTypeManager dtm) {
-		Iterator<GTreeNode> iterator = getAllChildren().iterator();
+		Iterator<GTreeNode> iterator = getChildren().iterator();
 		while (iterator.hasNext()) {
 			GTreeNode node = iterator.next();
 			ArchiveNode archiveNode = (ArchiveNode) node;
@@ -170,17 +176,17 @@ public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, Dat
 
 	@Override
 	public List<GTreeNode> generateChildren() {
-		List<GTreeNode> children = new ArrayList<>();
+		List<GTreeNode> list = new ArrayList<>();
 		Iterator<Archive> iterator = archiveManager.getAllArchives().iterator();
 		while (iterator.hasNext()) {
-			children.add(createArchiveNode(iterator.next()));
+			list.add(createArchiveNode(iterator.next(), filterState));
 		}
-		Collections.sort(children);
-		return children;
+		Collections.sort(list);
+		return list;
 	}
 
 	private ArchiveNode getArchiveNode(Archive archive) {
-		List<GTreeNode> allChildrenList = getAllChildren();
+		List<GTreeNode> allChildrenList = getChildren();
 		for (GTreeNode node : allChildrenList) {
 			if (node instanceof ArchiveNode) {
 				ArchiveNode archiveNode = (ArchiveNode) node;
@@ -200,10 +206,10 @@ public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, Dat
 
 		@Override
 		public void archiveClosed(Archive archive) {
-			if (!isChildrenLoadedOrInProgress()) {
+			if (!isLoaded()) {
 				return;
 			}
-			List<GTreeNode> allChildrenList = getAllChildren();
+			List<GTreeNode> allChildrenList = getChildren();
 			Iterator<GTreeNode> iterator = allChildrenList.iterator();
 			while (iterator.hasNext()) {
 				GTreeNode node = iterator.next();
@@ -218,17 +224,14 @@ public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, Dat
 
 		@Override
 		public void archiveOpened(Archive archive) {
-			if (isChildrenLoadedOrInProgress()) {
-				GTreeNode node = createArchiveNode(archive);
-				List<GTreeNode> allChildrenList = getAllChildren();
+			if (isLoaded()) {
+				GTreeNode node = createArchiveNode(archive, filterState);
+				List<GTreeNode> allChildrenList = getChildren();
 				int index = Collections.binarySearch(allChildrenList, node);
 				if (index < 0) {
 					index = -index - 1;
+					addNode(index, node);
 				}
-				addNode(index, node);
-				// kick tree to refilter if filter in place so that nodes will stay expaned see
-				// SCR #7895
-				tree.setFilterText(tree.getFilterText());
 			}
 		}
 
@@ -249,14 +252,12 @@ public class ArchiveRootNode extends GTreeLazyNode implements GTreeRootNode, Dat
 		}
 	}
 
-	@Override
-	public GTree getGTree() {
-		return tree;
+	public void setFilterArray(boolean enabled) {
+		filterState.setFilterArrays(enabled);
 	}
 
-	@Override
-	public void setGTree(GTree tree) {
-		this.tree = tree;
+	public void setFilterPointer(boolean enabled) {
+		filterState.setFilterPointers(enabled);
 	}
 
 }

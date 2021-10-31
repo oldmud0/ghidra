@@ -4,9 +4,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
- * 
+ *
  *      http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -19,9 +19,11 @@ import java.awt.Color;
 import java.awt.geom.Point2D;
 import java.util.*;
 
+import com.google.common.base.Function;
+
 import edu.uci.ics.jung.algorithms.layout.Layout;
-import edu.uci.ics.jung.graph.Graph;
 import edu.uci.ics.jung.visualization.*;
+import edu.uci.ics.jung.visualization.layout.ObservableCachingLayout;
 import edu.uci.ics.jung.visualization.renderers.Renderer;
 import edu.uci.ics.jung.visualization.transform.shape.GraphicsDecorator;
 import ghidra.graph.viewer.*;
@@ -32,6 +34,9 @@ import ghidra.graph.viewer.layout.*;
  * This was created to add the ability to paint selected vertices above other vertices.  We need
  * this since the Jung Graph has no notion of Z-order and thus does not let us specify that any
  * particular vertex should be above another one.
+ *
+ * @param <V> the vertex type
+ * @param <E> the edge type
  */
 public class VisualGraphRenderer<V extends VisualVertex, E extends VisualEdge<V>>
 		extends edu.uci.ics.jung.visualization.renderers.BasicRenderer<V, E> {
@@ -39,7 +44,8 @@ public class VisualGraphRenderer<V extends VisualVertex, E extends VisualEdge<V>
 	/**
 	 * Used for displaying grid information for graph layouts
 	 */
-	public static Map<Graph<?, ?>, LayoutLocationMap<?, ?>> DEBUG_ROW_COL_MAP = new HashMap<>();
+	public static Map<VisualGraphLayout<?, ?>, LayoutLocationMap<?, ?>> DEBUG_ROW_COL_MAP =
+		new HashMap<>();
 
 	private Renderer.EdgeLabel<V, E> edgeLabelRenderer = new BasicEdgeLabelRenderer<>();
 
@@ -83,7 +89,6 @@ public class VisualGraphRenderer<V extends VisualVertex, E extends VisualEdge<V>
 		// paint all the edges
 		// DEBUG code to show the edges *over* the vertices
 //		for (E e : layout.getGraph().getEdges()) {
-//
 //			renderEdge(renderContext, layout, e);
 //			renderEdgeLabel(renderContext, layout, e);
 //		}
@@ -109,17 +114,24 @@ public class VisualGraphRenderer<V extends VisualVertex, E extends VisualEdge<V>
 			return;
 		}
 
-		String label = rc.getEdgeLabelTransformer().apply(e);
+		Function<? super E, String> xform = rc.getEdgeLabelTransformer();
+		String label = xform.apply(e);
 		if (label == null) {
 			return;
 		}
-		super.renderEdgeLabel(rc, layout, e);
+
+		edgeLabelRenderer.labelEdge(rc, layout, e, xform.apply(e));
 	}
 
+	@SuppressWarnings({ "unchecked", "rawtypes" }) // the types in the cast matter not
 	private void paintLayoutGridCells(RenderContext<V, E> renderContext, Layout<V, E> layout) {
 
-		Graph<V, E> graph = layout.getGraph();
-		LayoutLocationMap<?, ?> locationMap = DEBUG_ROW_COL_MAP.get(graph);
+		// to enable this debug, search java files for commented-out uses of 'DEBUG_ROW_COL_MAP'
+		Layout<V, E> key = layout;
+		if (layout instanceof ObservableCachingLayout) {
+			key = ((ObservableCachingLayout) layout).getDelegate();
+		}
+		LayoutLocationMap<?, ?> locationMap = DEBUG_ROW_COL_MAP.get(key);
 		if (locationMap == null) {
 			return;
 		}

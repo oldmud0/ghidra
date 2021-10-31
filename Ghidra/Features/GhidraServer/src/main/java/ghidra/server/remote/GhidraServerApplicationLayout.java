@@ -17,11 +17,14 @@ package ghidra.server.remote;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
 
 import ghidra.framework.ApplicationProperties;
 import ghidra.util.SystemUtilities;
 import utility.application.ApplicationLayout;
 import utility.application.ApplicationUtilities;
+import utility.module.ModuleUtilities;
 
 /**
  * The Ghidra server application layout defines the customizable elements of the Ghidra 
@@ -51,9 +54,14 @@ public class GhidraServerApplicationLayout extends ApplicationLayout {
 
 		// Extension directories
 		extensionArchiveDir = null;
-		extensionInstallationDir = null;
+		extensionInstallationDirs = Collections.emptyList();
 
 		// User directories (don't let anything use the user home directory...there may not be one)
 		userTempDir = ApplicationUtilities.getDefaultUserTempDir(applicationProperties);
+
+		// Modules - required to find module data files
+		modules = ModuleUtilities.findModules(applicationRootDirs,
+			ModuleUtilities.findModuleRootDirectories(applicationRootDirs, new ArrayList<>()));
+
 	}
 }

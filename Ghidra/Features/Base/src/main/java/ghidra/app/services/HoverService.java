@@ -1,6 +1,5 @@
 /* ###
  * IP: GHIDRA
- * REVIEWED: YES
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +15,12 @@
  */
 package ghidra.app.services;
 
-import ghidra.program.model.listing.Program;
-import ghidra.program.util.ProgramLocation;
-
 import javax.swing.JComponent;
 
 import docking.widgets.fieldpanel.field.Field;
 import docking.widgets.fieldpanel.support.FieldLocation;
+import ghidra.program.model.listing.Program;
+import ghidra.program.util.ProgramLocation;
 
 /**
  * <code>HoverService</code> provides the ability to popup data Windows over a Field viewer
@@ -31,7 +29,8 @@ import docking.widgets.fieldpanel.support.FieldLocation;
 public interface HoverService {
 
 	/**
-	 * Returns the priority of this hover service.
+	 * Returns the priority of this hover service.   A lower priority is more important.
+	 * @return the priority
 	 */
 	public int getPriority();
 
@@ -42,7 +41,8 @@ public interface HoverService {
 	public void scroll(int amount);
 
 	/**
-	 * Return whether hover mode is "on."
+	 * Return whether hover mode is "on"
+	 * @return the priority
 	 */
 	public boolean hoverModeSelected();
 
@@ -53,7 +53,6 @@ public interface HoverService {
 	 * @param programLocation the program location where the mouse is hovering.
 	 * @param fieldLocation the precise mouse location within the field viewer
 	 * @param field the field over which the mouse is hovering
-	 * @param event the last mouse motion event over the field viewer component (i.e., FieldPanel).
 	 * @return The component to be shown for the given location information.
 	 */
 	public JComponent getHoverComponent(Program program, ProgramLocation programLocation,

@@ -15,11 +15,11 @@
  */
 package ghidra.file.formats.ext4;
 
+import java.io.IOException;
+
 import ghidra.app.util.bin.*;
 import ghidra.program.model.data.*;
 import ghidra.util.exception.DuplicateNameException;
-
-import java.io.IOException;
 
 public class Ext4SuperBlock implements StructConverter {
 
@@ -226,6 +226,14 @@ public class Ext4SuperBlock implements StructConverter {
 		return s_blocks_count_lo;
 	}
 
+	/**
+	 * Return the calculated block count by combining the s_blocks_count_lo and s_blocks_count_hi
+	 * @return the calculated block count by combining the s_blocks_count_lo and s_blocks_count_hi
+	 */
+	public long getS_blocks_count() {
+		return ((long) s_blocks_count_hi << 32) | Integer.toUnsignedLong(s_blocks_count_lo);
+	}
+
 	public int getS_r_blocks_count_lo() {
 		return s_r_blocks_count_lo;
 	}
@@ -355,7 +363,7 @@ public class Ext4SuperBlock implements StructConverter {
 		while (i < s_volume_name.length && s_volume_name[i] != '\0') {
 			i++;
 		}
-		return new String(s_volume_name, 0, i);
+		return new String(s_volume_name, 0, i, Ext4FileSystem.EXT4_DEFAULT_CHARSET);
 	}
 
 	public byte[] getS_last_mounted() {

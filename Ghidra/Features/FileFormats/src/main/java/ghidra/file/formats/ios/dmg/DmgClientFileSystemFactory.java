@@ -21,7 +21,6 @@ import java.io.IOException;
 import generic.jar.ResourceFile;
 import ghidra.app.util.bin.ByteProvider;
 import ghidra.file.formats.xar.XARUtil;
-import ghidra.file.formats.zlib.ZLIB;
 import ghidra.formats.gfilesystem.*;
 import ghidra.formats.gfilesystem.factory.GFileSystemFactoryWithFile;
 import ghidra.formats.gfilesystem.factory.GFileSystemProbeFull;
@@ -46,7 +45,7 @@ public class DmgClientFileSystemFactory
 	@Override
 	public boolean probe(FSRL containerFSRL, ByteProvider byteProvider, File containerFile,
 			FileSystemService fsService, TaskMonitor taskMonitor)
-					throws IOException, CancelledException {
+			throws IOException, CancelledException {
 
 		if (!isDmgPresent()) {
 			return false;
@@ -56,11 +55,8 @@ public class DmgClientFileSystemFactory
 		if (XARUtil.isXAR(byteProvider)) {
 			return false;
 		}
-		if (ZLIB.isZLIB(byteProvider)) {
-			return true;
-		}
 
-		return isEncrypted(containerFile);
+		return hasUDIF(byteProvider) || isEncrypted(containerFile);
 	}
 
 	private static boolean isEncrypted(byte[] startBytes) {
@@ -81,10 +77,21 @@ public class DmgClientFileSystemFactory
 		return false;
 	}
 
+	private static boolean hasUDIF(ByteProvider bp) {
+		try {
+			UDIFHeader udif = UDIFHeader.read(bp);
+			return udif.isValid() && udif.hasGoodOffsets(bp);
+		}
+		catch (IOException e) {
+			// ignore, fall thru
+		}
+		return false;
+	}
+
 	@Override
 	public DmgClientFileSystem create(FSRL containerFSRL, FSRLRoot targetFSRL, File containerFile,
 			FileSystemService fsService, TaskMonitor monitor)
-					throws IOException, CancelledException {
+			throws IOException, CancelledException {
 
 		String dmgName = containerFSRL.getName();
 
@@ -103,7 +110,7 @@ public class DmgClientFileSystemFactory
 				fsService.getDerivedFile(containerFSRL, "decrypted " + containerName, (srcFile) -> {
 					monitor.initialize(srcFile.length());
 					return new DmgDecryptorStream(containerName, dmgName, srcFile);
-				} , monitor);
+				}, monitor);
 			decrypted_dmg_file = fce.file;
 		}
 		else {

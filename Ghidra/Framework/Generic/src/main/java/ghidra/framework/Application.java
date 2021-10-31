@@ -460,18 +460,19 @@ public class Application {
 		if (module == null) {
 			return null;
 		}
-		
-		File file = getModuleFile(module, "build/os/" + Platform.CURRENT_PLATFORM.getDirectoryName(),
-			exactFilename);
+
+		File file = getModuleFile(module,
+			"build/os/" + Platform.CURRENT_PLATFORM.getDirectoryName(), exactFilename);
 
 		if (file == null) {
 			file = getModuleFile(module, "os/" + Platform.CURRENT_PLATFORM.getDirectoryName(),
 				exactFilename);
 		}
-		
+
 		// Allow win32 to be used for win64 as fallback
 		if (file == null && Platform.CURRENT_PLATFORM == Platform.WIN_64) {
-			file = getModuleFile(module, "build/os/" + Platform.WIN_32.getDirectoryName(), exactFilename);
+			file = getModuleFile(module, "build/os/" + Platform.WIN_32.getDirectoryName(),
+				exactFilename);
 		}
 		if (file == null && Platform.CURRENT_PLATFORM == Platform.WIN_64) {
 			file = getModuleFile(module, "os/" + Platform.WIN_32.getDirectoryName(), exactFilename);
@@ -492,12 +493,13 @@ public class Application {
 
 	private File getOSFileInAnyModule(String path) throws FileNotFoundException {
 
-		File file = findModuleFile("build/os/" + Platform.CURRENT_PLATFORM.getDirectoryName(), path);
-		
+		File file =
+			findModuleFile("build/os/" + Platform.CURRENT_PLATFORM.getDirectoryName(), path);
+
 		if (file == null) {
 			file = findModuleFile("os/" + Platform.CURRENT_PLATFORM.getDirectoryName(), path);
 		}
-		
+
 		// Allow win32 to be used for win64 as fallback
 		if (file == null && Platform.CURRENT_PLATFORM == Platform.WIN_64) {
 			file = findModuleFile("build/os/" + Platform.WIN_32.getDirectoryName(), path);
@@ -577,7 +579,7 @@ public class Application {
 	 * <b>Note:  Be sure you understand that there may be multiple application root
 	 * directories in development mode.</b>  In general you should not be using this method for 
 	 * searching for files yourself, but instead using 
-	 * the various <tt>find*</tt> methods of this class.    
+	 * the various <code>find*</code> methods of this class.    
 	 * 
 	 * @return Returns the application root directory.
 	 * @see #getApplicationRootDirectories()
@@ -657,7 +659,7 @@ public class Application {
 	/**
 	 * Return the module root directory for the module with the given name.
 	 * @param moduleName the name of the module.
-	 * @return the module root directory for the module with the given name.
+	 * @return the module root directory for the module with the given name or null if not found.
 	 */
 	public static ResourceFile getModuleRootDir(String moduleName) {
 		checkAppInitialized();
@@ -709,12 +711,12 @@ public class Application {
 	}
 
 	/**
-	 * Returns the Release name for this build or null if unknown.
+	 * Returns the release name for this build.
+	 * @return the application release name.
 	 */
 	public static String getApplicationReleaseName() {
 		checkAppInitialized();
-		return app.layout.getApplicationProperties().getProperty(
-			ApplicationProperties.RELEASE_NAME_PROPERTY);
+		return app.layout.getApplicationProperties().getApplicationReleaseName();
 	}
 
 	/**
@@ -802,7 +804,7 @@ public class Application {
 	/**
 	 * Returns a list of all directories in any module that have the given module relative path.  For
 	 * example, a relative path of "foo/bar" will return all directories that are of the form
-	 * <module root>/data/foo/bar
+	 * {@code <module root>/data/foo/bar}
 	 * @param relativePath the module relative path to search for.
 	 * @return a list of all directories in any module that have the given module relative path.
 	 */
@@ -888,7 +890,7 @@ public class Application {
 	/**
 	 * Returns the file relative to the named module's directory.
 	 * @param moduleName the name of the module.
-	 * @param relativeDataPath the path relative to the module's data directory.
+	 * @param relativePath the path relative to the module's data directory.
 	 * @throws FileNotFoundException if the file does not exist.
 	 */
 	public static ResourceFile getModuleFile(String moduleName, String relativePath)

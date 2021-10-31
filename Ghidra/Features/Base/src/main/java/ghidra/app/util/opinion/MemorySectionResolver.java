@@ -53,7 +53,7 @@ public abstract class MemorySectionResolver {
 	 * @param key the loadable section key which corresponds to this memory "section"
 	 * @param fileOffset data source file offset.  It is assumed that all initialized
 	 * "sections" draw from a single data source.
-	 * @param length number of bytes within "section" 
+	 * @param numberOfBytes number of bytes within "section" 
 	 * @param startAddress desired physical start address of "section"
 	 * @param sectionName name of "section" 
 	 * @param isReadable true if "section" has read privilege
@@ -90,7 +90,7 @@ public abstract class MemorySectionResolver {
 	 * Add uninitialized memory "section".
 	 * The last "section" defined will take precedence when resolving conflicts.  
 	 * @param key the loadable section key which corresponds to this memory "section"
-	 * @param length number of bytes within "section" 
+	 * @param numberOfBytes number of bytes within "section" 
 	 * @param startAddress desired physical start address of "section"
 	 * @param sectionName name of "section" 
 	 * @param isReadable true if "section" has read privilege
@@ -115,6 +115,15 @@ public abstract class MemorySectionResolver {
 	}
 
 	private String getUniqueSectionName(String baseName) {
+		if (baseName != null) {
+			baseName = baseName.trim();
+			if (baseName.length() == 0) {
+				baseName = "NO-NAME";
+			}
+		}
+		else {
+			baseName = "NO-NAME";
+		}
 		Memory mem = program.getMemory();
 		String name = baseName;
 		int index = 0;
@@ -359,18 +368,12 @@ public abstract class MemorySectionResolver {
 					maxAddr = block.getEnd();
 				}
 				else {
-					// block may be null due to unexpected conflict
+					// block may be null due to unexpected conflict - allow to continue
 					block = createInitializedBlock(section.key, false, blockName, address,
 						fileOffset, rangeSize, section.getComment(), section.isReadable(),
 						section.isWritable(), section.isExecute(), monitor);
 					minAddr = address;
 					maxAddr = address.addNoWrap(rangeSize - 1);
-					if (block == null) {
-						// This is a bug but allow load to continue by not referring to block below
-						Msg.error(this,
-							"Unexpected ELF memory bock load conflict when creating '" + blockName +
-								"' at " + minAddr.toString(true) + "-" + maxAddr.toString(true));
-					}
 				}
 				if (fileLoadRangeMap != null) {
 					long chunkFileOffset = section.getFileOffset() + sectionByteOffset;

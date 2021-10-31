@@ -115,7 +115,7 @@ public class OldLanguageFactory {
 	/**
 	 * Validate all old language definitions contained within the old language map.  
 	 * This is intended to be used by a unit test.
-	 * @returns number of validation errors
+	 * @return number of validation errors
 	 */
 	int validateAllOldLanguages() {
 		int errorCnt = 0;
@@ -143,8 +143,8 @@ public class OldLanguageFactory {
 					langSvc.getLanguageDescription(oldLang.getLanguageID());
 				if (curDescr.getVersion() <= oldDescr.getVersion()) {
 					// Ignore old versions which are inappropriate
-					log.warn("WARNING! Ignoring old language spec, version still exists: " +
-						oldLang);
+					log.warn(
+						"WARNING! Ignoring old language spec, version still exists: " + oldLang);
 					continue;
 				}
 			}
@@ -208,8 +208,8 @@ public class OldLanguageFactory {
 	 * @throws IOException if file error occurs
 	 * @throws LanguageNotFoundException if lang is unknown to DefaultLanguageService
 	 */
-	public static void createOldLanguageFile(Language lang, File file) throws IOException,
-			LanguageNotFoundException {
+	public static void createOldLanguageFile(Language lang, File file)
+			throws IOException, LanguageNotFoundException {
 
 		LanguageService languageService = DefaultLanguageService.getLanguageService();
 		if (lang instanceof OldLanguage) {
@@ -270,10 +270,9 @@ public class OldLanguageFactory {
 
 	private static Element getRegistersElement(Language lang) {
 
-		Register[] registers = lang.getRegisters();
 		Register contextReg = lang.getContextBaseRegister();
 		Element registersElement = new Element("registers");
-		if (contextReg != null) {
+		if (contextReg != Register.NO_CONTEXT) {
 			Element ctxElement = getRegisterElement(contextReg);
 			int contextBitLength = contextReg.getBitLength();
 			for (Register bitReg : contextReg.getChildRegisters()) {
@@ -292,7 +291,7 @@ public class OldLanguageFactory {
 			}
 			registersElement.addContent(ctxElement);
 		}
-		for (Register reg : registers) {
+		for (Register reg : lang.getRegisters()) {
 			if (!reg.getBaseRegister().isProcessorContext()) {
 				Element regElement = getRegisterElement(reg);
 				registersElement.addContent(regElement);

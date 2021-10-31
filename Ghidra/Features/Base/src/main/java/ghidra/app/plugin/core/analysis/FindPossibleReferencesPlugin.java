@@ -22,8 +22,10 @@ import docking.ActionContext;
 import docking.ComponentProvider;
 import docking.action.DockingAction;
 import docking.action.MenuData;
+import docking.action.builder.ActionBuilder;
+import docking.tool.ToolConstants;
 import ghidra.app.CorePluginPackage;
-import ghidra.app.context.*;
+import ghidra.app.context.NavigatableActionContext;
 import ghidra.app.events.ProgramClosedPluginEvent;
 import ghidra.app.events.ProgramSelectionPluginEvent;
 import ghidra.app.plugin.PluginCategoryNames;
@@ -33,7 +35,6 @@ import ghidra.app.util.HelpTopics;
 import ghidra.app.util.query.TableService;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
-import ghidra.framework.plugintool.util.ToolConstants;
 import ghidra.program.model.address.*;
 import ghidra.program.model.listing.CodeUnit;
 import ghidra.program.model.listing.Program;
@@ -96,35 +97,31 @@ public class FindPossibleReferencesPlugin extends Plugin {
 	}
 
 	private void createActions() {
-		action = new ListingContextAction(SEARCH_DIRECT_REFS_ACTION_NAME, getName()) {
-			@Override
-			protected void actionPerformed(ListingActionContext context) {
-				findReferences(context);
-			}
+		action = new ActionBuilder(SEARCH_DIRECT_REFS_ACTION_NAME, getName())
+				.menuPath(ToolConstants.MENU_SEARCH, "For Direct References")
+				.menuGroup("search for")
+				.supportsDefaultToolContext(true)
+				.helpLocation(new HelpLocation(HelpTopics.SEARCH, SEARCH_DIRECT_REFS_ACTION_NAME))
+				.description(getPluginDescription().getDescription())
+				.withContext(NavigatableActionContext.class)
+				.inWindow(ActionBuilder.When.CONTEXT_MATCHES)
+				.onAction(this::findReferences)
+				.enabledWhen(this::hasCorrectAddressSize)
+				.buildAndInstall(tool);
 
-			@Override
-			protected boolean isEnabledForContext(ListingActionContext context) {
-				int size =
-					context.getProgram().getAddressFactory().getDefaultAddressSpace().getSize();
-				if ((size == 64) || (size == 32) || (size == 24) || (size == 16) || (size == 20) ||
-					(size == 21)) {
-					return true;
-				}
-				return false;
-			}
-		};
-		action.setHelpLocation(new HelpLocation(HelpTopics.SEARCH, SEARCH_DIRECT_REFS_ACTION_NAME));
-		action.setMenuBarData(
-			new MenuData(new String[] { ToolConstants.MENU_SEARCH, "For Direct References" }, null,
-				"search for"));
+	}
 
-		action.setDescription(getPluginDescription().getDescription());
-		//enableOnLocation(action);
-		tool.addAction(action);
+	private boolean hasCorrectAddressSize(NavigatableActionContext context) {
+		int size =
+			context.getProgram().getAddressFactory().getDefaultAddressSpace().getSize();
+		if ((size == 64) || (size == 32) || (size == 24) || (size == 16) || (size == 20) ||
+			(size == 21)) {
+			return true;
+		}
+		return false;
+	}
 
-	} // end of createActions()
-
-	private void createLocalActions(ProgramLocationActionContext context, ComponentProvider p,
+	private void createLocalActions(NavigatableActionContext context, ComponentProvider p,
 			FindReferencesTableModel model) {
 
 		addLocalAlignment(p, model, 1);
@@ -196,8 +193,10 @@ public class FindPossibleReferencesPlugin extends Plugin {
 					"Could not find memory associated with " + fromAddr);
 				return;
 			}
-			if (currentProgram.getMemory().getBlock(
-				fromAddr).getType() == MemoryBlockType.BIT_MAPPED) {
+			if (currentProgram.getMemory()
+					.getBlock(
+						fromAddr)
+					.getType() == MemoryBlockType.BIT_MAPPED) {
 				Msg.showWarn(getClass(), null, "Search For Direct References",
 					"Cannot search for direct references on bit memory!");
 				return;

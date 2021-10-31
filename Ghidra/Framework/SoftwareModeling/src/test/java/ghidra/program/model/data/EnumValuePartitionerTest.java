@@ -15,27 +15,26 @@
  */
 package ghidra.program.model.data;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 import java.util.List;
 import java.util.Set;
 
 import org.junit.Test;
 
-import generic.test.AbstractGenericTest;
+import generic.test.AbstractGTest;
 
-public class EnumValuePartitionerTest extends AbstractGenericTest {
+public class EnumValuePartitionerTest extends AbstractGTest {
 
 	@Test
 	public void testDisjointValues() {
-		List<BitGroup> list = EnumValuePartitioner.partition(new long[] { 1, 2, 4, 8 });
+		List<BitGroup> list = EnumValuePartitioner.partition(new long[] { 1, 2, 4, 8 }, 1);
 		assertEquals(5, list.size());
 	}
 
 	@Test
 	public void testAllOverlappingValues() {
-		List<BitGroup> list = EnumValuePartitioner.partition(new long[] { 1, 2, 4, 8, 15 });
+		List<BitGroup> list = EnumValuePartitioner.partition(new long[] { 1, 2, 4, 8, 15 }, 1);
 		assertEquals(2, list.size());
 		BitGroup group = list.get(0);
 		assertEquals(15, group.getMask());
@@ -50,7 +49,7 @@ public class EnumValuePartitionerTest extends AbstractGenericTest {
 
 	@Test
 	public void testSomeOverlappingValues() {
-		List<BitGroup> list = EnumValuePartitioner.partition(new long[] { 1, 2, 4, 8, 6 });
+		List<BitGroup> list = EnumValuePartitioner.partition(new long[] { 1, 2, 4, 8, 6 }, 1);
 		assertEquals(4, list.size());
 		assertEquals(1, list.get(0).getMask());
 		assertEquals(8, list.get(1).getMask());

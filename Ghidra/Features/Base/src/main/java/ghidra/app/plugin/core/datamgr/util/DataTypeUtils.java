@@ -22,6 +22,7 @@ import java.util.List;
 import javax.swing.Icon;
 import javax.swing.ImageIcon;
 
+import ghidra.app.services.DataTypeQueryService;
 import ghidra.app.services.DataTypeManagerService;
 import ghidra.program.model.data.*;
 import ghidra.program.model.data.Enum;
@@ -328,7 +329,7 @@ public class DataTypeUtils {
 	 *         string.
 	 */
 	public static List<DataType> getStartsWithMatchingDataTypes(String searchString,
-			DataTypeManagerService dataService) {
+			DataTypeQueryService dataService) {
 		return getMatchingSubList(searchString, searchString + END_CHAR,
 			dataService.getSortedDataTypeList());
 	}
@@ -343,7 +344,7 @@ public class DataTypeUtils {
 	 *         string. 
 	 */
 	public static List<DataType> getExactMatchingDataTypes(String searchString,
-			DataTypeManagerService dataService) {
+			DataTypeQueryService dataService) {
 		return getMatchingSubList(searchString, searchString + BEGIN_CHAR,
 			dataService.getSortedDataTypeList());
 	}
@@ -455,7 +456,7 @@ public class DataTypeUtils {
 		if (dataType instanceof Pointer) {
 			Pointer pdt = (Pointer) dataType;
 			return new PointerDataType(copyToNamedBaseDataType(pdt.getDataType(), dtm),
-				pdt.isDynamicallySized() ? -1 : pdt.getLength(), dtm);
+				pdt.hasLanguageDependantLength() ? -1 : pdt.getLength(), dtm);
 		}
 		else if (dataType instanceof Array) {
 			Array adt = (Array) dataType;
@@ -490,11 +491,11 @@ public class DataTypeUtils {
 //	    JFrame frame = new JFrame();
 //	    JPanel panel = new JPanel();
 //	    
-//	    JLabel label1 = new JLabel();
+//	    JLabel label1 = new GDLabel();
 //	    Icon icon = getOpenFolderIcon( false );
 //	    label1.setIcon( icon );
 //	    
-//	    JLabel label2 = new JLabel();
+//	    JLabel label2 = new GDLabel();
 //	    Icon icon2 = ResourceManager.getDisabledIcon( (ImageIcon) icon );
 //	    label2.setIcon( icon2 );	    	    
 //	        

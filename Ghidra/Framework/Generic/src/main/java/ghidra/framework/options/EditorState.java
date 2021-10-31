@@ -17,17 +17,16 @@ package ghidra.framework.options;
 
 import java.awt.Component;
 import java.beans.*;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
 
-import ghidra.util.SystemUtilities;
+import ghidra.framework.Application;
 
 public class EditorState implements PropertyChangeListener {
 
 	private Object originalValue;
 	private Object currentValue;
 	private PropertyEditor editor;
-	private Set<PropertyChangeListener> listeners = new HashSet<PropertyChangeListener>();
+	private Set<PropertyChangeListener> listeners = new HashSet<>();
 	private Options options;
 	private String name;
 
@@ -37,10 +36,12 @@ public class EditorState implements PropertyChangeListener {
 		this.currentValue = options.getObject(name, null);
 		this.originalValue = currentValue;
 		this.editor = options.getPropertyEditor(name);
-		editor.setValue(currentValue);
+		if (editor != null) {
+			editor.setValue(currentValue);
 
-		editor.removePropertyChangeListener(this); // don't repeatedly add editors
-		editor.addPropertyChangeListener(this);
+			editor.removePropertyChangeListener(this); // don't repeatedly add editors
+			editor.addPropertyChangeListener(this);
+		}
 	}
 
 	void addListener(PropertyChangeListener listener) {
@@ -87,11 +88,32 @@ public class EditorState implements PropertyChangeListener {
 	}
 
 	public boolean isValueChanged() {
-		return !SystemUtilities.isEqual(currentValue, originalValue);
+		return !Objects.equals(currentValue, originalValue);
+	}
+
+	public void applyNonDefaults(Options save) {
+		if (!Objects.equals(currentValue, options.getDefaultValue(name))) {
+			Options sub = save.getOptions(options.getName());
+			sub.putObject(name, currentValue);
+		}
+	}
+
+	public void loadFrom(Options loadFrom) {
+		Options sub = loadFrom.getOptions(options.getName());
+		Object newValue = sub.getObject(name, options.getDefaultValue(name));
+		if (editor != null && !Objects.equals(currentValue, newValue)) {
+			editor.setValue(newValue);
+		}
+	}
+
+	public boolean hasSameValue(Options compareTo) {
+		Options sub = compareTo.getOptions(options.getName());
+		Object newValue = sub.getObject(name, options.getDefaultValue(name));
+		return Objects.equals(newValue, currentValue);
 	}
 
 	public void applyValue() {
-		if (SystemUtilities.isEqual(currentValue, originalValue)) {
+		if (Objects.equals(currentValue, originalValue)) {
 			return;
 		}
 		boolean success = false;
@@ -117,10 +139,16 @@ public class EditorState implements PropertyChangeListener {
 	 * directly, as opposed to using the generic framework.
 	 */
 	public boolean supportsCustomOptionsEditor() {
-		return (editor instanceof CustomOptionsEditor);
+		return editor == null || (editor instanceof CustomOptionsEditor);
 	}
 
 	public Component getEditorComponent() {
+		if (editor == null) {
+			// can occur if support has been dropped for custom state/option
+			editor = new ErrorPropertyEditor(
+				"Ghidra does not know how to render state: " + name, null);
+			return editor.getCustomEditor();
+		}
 		if (editor.supportsCustomEditor()) {
 			return editor.getCustomEditor();
 		}
@@ -143,9 +171,10 @@ public class EditorState implements PropertyChangeListener {
 		}
 
 		editor.removePropertyChangeListener(this);
-		editor =
-			new ErrorPropertyEditor("Ghidra does not know how to use PropertyEditor: " +
-				editor.getClass().getName(), null);
+		editor = new ErrorPropertyEditor(
+			Application.getName() + " does not know how to use PropertyEditor: " +
+				editor.getClass().getName(),
+			null);
 		return editor.getCustomEditor();
 	}
 
@@ -156,4 +185,5 @@ public class EditorState implements PropertyChangeListener {
 	public String getDescription() {
 		return options.getDescription(name);
 	}
+
 }

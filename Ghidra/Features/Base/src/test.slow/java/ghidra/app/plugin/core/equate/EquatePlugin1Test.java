@@ -17,8 +17,8 @@ package ghidra.app.plugin.core.equate;
 
 import static org.junit.Assert.*;
 
-import java.lang.reflect.InvocationTargetException;
 import java.util.List;
+import java.util.Set;
 
 import javax.swing.*;
 import javax.swing.table.TableModel;
@@ -39,6 +39,7 @@ import ghidra.app.util.viewer.field.ListingTextField;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.data.*;
+import ghidra.program.model.data.Enum;
 import ghidra.program.model.listing.Data;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.scalar.Scalar;
@@ -52,7 +53,7 @@ import ghidra.util.table.GhidraTable;
  */
 public class EquatePlugin1Test extends AbstractEquatePluginTest {
 
-	/**
+	/*
 	 * Tests that the set equate menu option is enabled when the cursor is on a valid scalar.
 	 */
 	@Test
@@ -65,11 +66,11 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		putCursorOnOperand(0x01002a83, 0);
 		assertTrue(setAction.isEnabledForContext(getListingContext()));
 		//rename and remove should not be in popup in this case
-		assertTrue(!renameAction.isEnabledForContext(getListingContext()));
-		assertTrue(!removeAction.isEnabledForContext(getListingContext()));
+		assertFalse(renameAction.isEnabledForContext(getListingContext()));
+		assertFalse(removeAction.isEnabledForContext(getListingContext()));
 	}
 
-	/**
+	/*
 	 * Tests that the rename menu option is enabled when the cursor is on an address with
 	 * a valid equate set.
 	 */
@@ -83,10 +84,10 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		assertTrue(removeAction.isEnabledForContext(getListingContext()));
 
 		//set equate action should not be in the popup in this case
-		assertTrue(!setAction.isEnabledForContext(getListingContext()));
+		assertFalse(setAction.isEnabledForContext(getListingContext()));
 	}
 
-	/**
+	/*
 	 * Tests that the remove menu option is available when the cursor is on an address
 	 * with a valid equate set.
 	 */
@@ -100,12 +101,11 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		assertTrue(removeAction.isEnabledForContext(getListingContext()));
 
 		//set equate action should not be in the popup in this case
-		assertTrue(!setAction.isEnabledForContext(getListingContext()));
+		assertFalse(setAction.isEnabledForContext(getListingContext()));
 	}
 
 	@Test
-	public void testApplyToOptions_SetEquate()
-			throws InterruptedException, InvocationTargetException {
+	public void testApplyToOptions_SetEquate() {
 		putCursorOnOperand(0x01002a8e, 0);
 
 		SetEquateDialog d = showSetEquateDialog();
@@ -141,7 +141,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 
 		//select applyToAll and verify that the other buttons respond accordingly
 		applyToAllButton.setSelected(true);
-		SwingUtilities.invokeAndWait(
+		runSwing(
 			() -> applyToAllButton.getActionListeners()[0].actionPerformed(null));
 		program.flushEvents();
 		waitForSwing();
@@ -155,7 +155,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		close(d);
 	}
 
-	/**
+	/*
 	 * Tests that the current selection button is the default option on the 
 	 * Set Equate dialog if there is a range of addresses selected.
 	 * 
@@ -163,8 +163,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 	 * @throws InvocationTargetException
 	 */
 	@Test
-	public void testApplyToOptions_SetEquate_Selection()
-			throws InterruptedException, InvocationTargetException {
+	public void testApplyToOptions_SetEquate_Selection() {
 
 		// put the cursor on a scalar 
 		putCursorOnOperand(0x1004bbd, 0);
@@ -205,7 +204,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 
 		//select applyToSelection and verify that the other buttons respond accordingly
 		applyToSelectionButton.setSelected(true);
-		SwingUtilities.invokeAndWait(
+		runSwing(
 			() -> applyToSelectionButton.getActionListeners()[0].actionPerformed(null));
 		program.flushEvents();
 		waitForSwing();
@@ -225,7 +224,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 
 		performAction(renameAction, cb.getProvider(), false);
 		SetEquateDialog d =
-			waitForDialogComponent(tool.getToolFrame(), SetEquateDialog.class, 2000);
+			waitForDialogComponent(SetEquateDialog.class);
 		assertNotNull(d);
 
 		JRadioButton applyToCurrentButton =
@@ -269,7 +268,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 
 		performAction(renameAction, cb.getProvider(), false);
 		SetEquateDialog d =
-			waitForDialogComponent(tool.getToolFrame(), SetEquateDialog.class, 2000);
+			waitForDialogComponent(SetEquateDialog.class);
 		assertNotNull(d);
 
 		JRadioButton applyToCurrentButton =
@@ -686,7 +685,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		assertEquals("0x2", f.getFieldElement(0, 22).getText());
 	}
 
-	/**
+	/*
 	 * Tests that the user is prompted before attempting to remove an equate within
 	 * a selection. 
 	 * 
@@ -705,7 +704,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		performAction(removeAction, cb.getProvider(), false);
 
 		// Wait for the confirmation dialog to pop up and verify.
-		OptionDialog d = waitForDialogComponent(tool.getToolFrame(), OptionDialog.class, 2000);
+		OptionDialog d = waitForDialogComponent(OptionDialog.class);
 		assertNotNull(d);
 		close(d);
 	}
@@ -716,10 +715,10 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 
 		env.close(program);
 
-		assertTrue(!setAction.isEnabledForContext(new ActionContext()));
+		assertFalse(setAction.isEnabledForContext(new ActionContext()));
 	}
 
-	/**
+	/*
 	 * Tests that the user cannot set an equate on a scalar that is
 	 * undefined (the equate option is not made available).
 	 */
@@ -737,7 +736,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		applyCmd(program, cmd);
 
 		// Verify that the menu option for setting an equate is not enabled.
-		assertTrue(!setAction.isEnabledForContext(getListingContext()));
+		assertFalse(setAction.isEnabledForContext(getListingContext()));
 	}
 
 	@Test
@@ -821,6 +820,35 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 	}
 
 	@Test
+	public void testNoConvertOnData() throws Exception {
+		Address addr = addr(0x01003384);
+
+		// action should not apply to BooleanDataType which produces Scalar value
+		createData(addr, BooleanDataType.dataType);
+		Data data = program.getListing().getDataAt(addr);
+		assertTrue(data.getDataType() instanceof BooleanDataType);
+
+		goTo(addr);
+		DockingActionIf action = getAction(equatePlugin, "Convert To Signed Decimal");
+
+		assertFalse(action.isAddToPopup(getListingContext()));
+		assertFalse(action.isEnabledForContext(getListingContext()));
+
+		// action should not apply to Enum which produces Scalar value
+		EnumDataType myEnum = new EnumDataType("Joe", 2);
+		myEnum.add("ValFFFF", -1);
+
+		createData(addr, myEnum);
+		data = program.getListing().getDataAt(addr);
+		assertTrue(data.getDataType() instanceof Enum);
+
+		goTo(addr);
+
+		assertFalse(action.isAddToPopup(getListingContext()));
+		assertFalse(action.isEnabledForContext(getListingContext()));
+	}
+
+	@Test
 	public void testConvertPickSameDatatype() throws Exception {
 		Address addr = addr(0x01003384);
 		createSignedData(addr);
@@ -841,7 +869,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 
 		putCursorOnOperand(0x010064ae, 1);
 
-		List<DockingActionIf> actions = tool.getDockingActionsByOwnerName("EquatePlugin");
+		Set<DockingActionIf> actions = getActionsByOwner(tool, "EquatePlugin");
 		int found = 0;
 		for (DockingActionIf action : actions) {
 			String name = action.getName();
@@ -873,11 +901,11 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 			}
 			else if (name.indexOf("Double") >= 0) {
 				assertTrue(popupPath[1].startsWith("Double"));
-				assertTrue(popupPath[1].endsWith(" 1.112536929253602E-308"));
+				assertTrue(popupPath[1].endsWith(" 1.976262583364986E-323"));
 			}
 			else if (name.indexOf("Float") >= 0) {
 				assertTrue(popupPath[1].startsWith("Float"));
-				assertTrue(popupPath[1].endsWith(" 5.877475E-39"));
+				assertTrue(popupPath[1].endsWith(" 5.605194E-45"));
 			}
 			else {
 				fail("Unhandled Convert item: " + name);
@@ -892,7 +920,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		putCursorOnOperand(0x010064a3, 0);
 
 		int found = 0;
-		List<DockingActionIf> actions = tool.getDockingActionsByOwnerName("EquatePlugin");
+		Set<DockingActionIf> actions = getActionsByOwner(tool, "EquatePlugin");
 		for (DockingActionIf action : actions) {
 			String name = action.getName();
 			if (!name.startsWith("Convert") || !action.isAddToPopup(getListingContext())) {
@@ -944,7 +972,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		putCursorOnOperand(0x01003a94, 0);
 
 		int found = 0;
-		List<DockingActionIf> actions = tool.getDockingActionsByOwnerName("EquatePlugin");
+		Set<DockingActionIf> actions = getActionsByOwner(tool, "EquatePlugin");
 		for (DockingActionIf action : actions) {
 			String name = action.getName();
 			if (!name.startsWith("Convert") || !action.isAddToPopup(getListingContext())) {
@@ -1144,7 +1172,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 		performAction("Convert To Char");
 
 		ListingTextField tf = (ListingTextField) cb.getCurrentField();
-		assertEquals("'\\x02'", tf.getFieldElement(0, 11).getText());
+		assertEquals("02h", tf.getFieldElement(0, 11).getText());
 
 		undo(program);
 		tf = (ListingTextField) cb.getCurrentField();
@@ -1153,7 +1181,7 @@ public class EquatePlugin1Test extends AbstractEquatePluginTest {
 
 		redo(program);
 		tf = (ListingTextField) cb.getCurrentField();
-		assertEquals("'\\x02'", tf.getFieldElement(0, 11).getText());
+		assertEquals("02h", tf.getFieldElement(0, 11).getText());
 	}
 
 	@Test

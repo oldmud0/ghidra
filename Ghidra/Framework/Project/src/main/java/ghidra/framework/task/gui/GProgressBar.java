@@ -18,14 +18,13 @@ package ghidra.framework.task.gui;
 import java.awt.*;
 import java.lang.reflect.InvocationTargetException;
 import java.text.NumberFormat;
-import java.util.ArrayList;
-import java.util.List;
 
 import javax.swing.*;
 
-import docking.ToolTipManager;
 import docking.util.AnimatedIcon;
 import docking.widgets.EmptyBorderButton;
+import docking.widgets.label.GDHtmlLabel;
+import docking.widgets.label.GIconLabel;
 import ghidra.util.Msg;
 import ghidra.util.SystemUtilities;
 import ghidra.util.layout.VerticalLayout;
@@ -59,12 +58,12 @@ public class GProgressBar extends JPanel {
 	private Timer updateTimer;
 
 	private EmptyBorderButton cancelButton;
-	private CancelledListener cancelledListner;
+	private CancelledListener cancelledListener;
 
-	public GProgressBar(CancelledListener cancelledListner, boolean includeTextField,
+	public GProgressBar(CancelledListener cancelledListener, boolean includeTextField,
 			boolean includeCancelButton, boolean includeAnimatedIcon, float fontSize) {
 		super(new BorderLayout(5, 1));
-		this.cancelledListner = cancelledListner;
+		this.cancelledListener = cancelledListener;
 		this.fontSize = fontSize;
 
 		buildProgressPanel(includeTextField, includeCancelButton, includeAnimatedIcon);
@@ -199,18 +198,18 @@ public class GProgressBar extends JPanel {
 	}
 
 	public void cancel() {
-		if (cancelledListner != null) {
-			cancelledListner.cancelled();
+		if (cancelledListener != null) {
+			cancelledListener.cancelled();
 		}
 	}
 
 	public void setCancelledListener(CancelledListener listener) {
-		this.cancelledListner = listener;
+		this.cancelledListener = listener;
 	}
 
 	private void buildProgressPanel(boolean includeTextField, boolean includeCancelButton,
 			boolean includeAnimatedIcon) {
-		messageLabel = new JLabel("               ") {
+		messageLabel = new GDHtmlLabel("               ") {
 			@Override
 			public void invalidate() {
 				// don't care
@@ -349,27 +348,17 @@ public class GProgressBar extends JPanel {
 	}
 
 	private void createAnimatedIcon() {
-		List<Icon> iconList = new ArrayList<>();
-		iconList.add(ResourceManager.loadImage("images/hourglass24_01.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_02.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_02.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_03.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_03.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_04.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_04.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_05.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_05.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_06.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_06.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_07.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_07.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_08.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_08.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_09.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_10.png"));
-		iconList.add(ResourceManager.loadImage("images/hourglass24_11.png"));
-		AnimatedIcon progressIcon = new AnimatedIcon(iconList, 150, 0);
-		imageLabel = new JLabel(progressIcon);
+
+		String[] filenames = { "images/hourglass24_01.png", "images/hourglass24_02.png",
+			"images/hourglass24_02.png", "images/hourglass24_03.png", "images/hourglass24_03.png",
+			"images/hourglass24_04.png", "images/hourglass24_04.png", "images/hourglass24_05.png",
+			"images/hourglass24_05.png", "images/hourglass24_06.png", "images/hourglass24_06.png",
+			"images/hourglass24_07.png", "images/hourglass24_07.png", "images/hourglass24_08.png",
+			"images/hourglass24_08.png", "images/hourglass24_09.png", "images/hourglass24_10.png",
+			"images/hourglass24_11.png" };
+
+		imageLabel =
+			new GIconLabel(new AnimatedIcon(ResourceManager.loadImages(filenames), 150, 0));
 	}
 
 }

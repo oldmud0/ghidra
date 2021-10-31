@@ -45,7 +45,7 @@ class ApplyFunctions {
 	 * @param log message log
 	 * @throws CancelledException if task cancelled
 	 */
-	static void applyTo(PdbParserNEW pdbParser, XmlPullParser xmlParser, TaskMonitor monitor,
+	static void applyTo(PdbParser pdbParser, XmlPullParser xmlParser, TaskMonitor monitor,
 			MessageLog log) throws CancelledException {
 		Program program = pdbParser.getProgram();
 		Listing listing = program.getListing();
@@ -73,7 +73,7 @@ class ApplyFunctions {
 				cmd.applyTo(program, monitor);
 			}
 
-			pdbParser.createSymbol(address, name, true, log, monitor);
+			pdbParser.createSymbol(address, name, true, log);
 
 			Function function = listing.getFunctionAt(address);
 			if (function == null) {
@@ -135,7 +135,7 @@ class ApplyFunctions {
 			//should never happen...
 		}
 		Function newFunction = createFunction(program, address);
-		renameThunk(thunkFunction, newFunction);
+		thunkFunction.setThunkedFunction(newFunction);
 		return newFunction;
 	}
 
@@ -163,7 +163,7 @@ class ApplyFunctions {
 			}
 		}
 		Function newFunction = createFunction(program, address);
-		renameThunk(thunkFunction, newFunction);
+		thunkFunction.setThunkedFunction(newFunction);
 		return newFunction;
 	}
 
@@ -179,20 +179,6 @@ class ApplyFunctions {
 			refList.add(refIter.next());
 		}
 		return refList;
-	}
-
-	private static void renameThunk(Function thunkFunction, Function newFunction) {
-		try {
-			Symbol thunkSymbol = thunkFunction.getSymbol();
-			if (thunkSymbol.getSource() == SourceType.DEFAULT ||
-				thunkSymbol.getSource() == SourceType.ANALYSIS) {
-				Symbol newSymbol = newFunction.getSymbol();
-				thunkSymbol.setNamespace(newSymbol.getParentNamespace());
-				thunkSymbol.setName("thunk_" + newSymbol.getName(), newSymbol.getSource());
-			}
-		}
-		catch (Exception e) {
-		}
 	}
 
 	private static Function createFunction(Program program, Address entryPoint) {

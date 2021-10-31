@@ -33,12 +33,12 @@ import ghidra.app.tablechooser.TableChooserExecutor;
 import ghidra.app.util.query.TableService;
 import ghidra.framework.model.DomainObjectChangedEvent;
 import ghidra.framework.model.DomainObjectListener;
-import ghidra.framework.options.DummyKeyBindingsOptionsAction;
 import ghidra.framework.plugintool.*;
 import ghidra.framework.plugintool.util.PluginStatus;
 import ghidra.program.model.listing.Program;
-import ghidra.util.table.DeleteTableRowAction;
+import ghidra.util.Swing;
 import ghidra.util.table.GhidraProgramTableModel;
+import ghidra.util.table.actions.DeleteTableRowAction;
 import ghidra.util.task.SwingUpdateManager;
 
 //@formatter:off
@@ -56,27 +56,15 @@ import ghidra.util.task.SwingUpdateManager;
 public class TableServicePlugin extends ProgramPlugin
 		implements TableService, DomainObjectListener {
 
-	static final String MAKE_SELECTION_ACTION_NAME = "Make Selection";
-	static final String REMOVE_ITEMS_ACTION_NAME = "Remove Items";
-
-	static final String SHARED_ACTION_OWNER_SUFFIX = " (Tool)";
-
 	private SwingUpdateManager updateMgr;
-	private Map<Program, List<TableComponentProvider<?>>> programMap =
-		new HashMap<Program, List<TableComponentProvider<?>>>();
+	private Map<Program, List<TableComponentProvider<?>>> programMap = new HashMap<>();
 
-	private Map<Program, List<TableChooserDialog>> programToDialogMap =
-		new HashMap<Program, List<TableChooserDialog>>();
+	private Map<Program, List<TableChooserDialog>> programToDialogMap = new HashMap<>();
 
 	public TableServicePlugin(PluginTool tool) {
 		super(tool, false, false);
 
-		updateMgr = new SwingUpdateManager(1000, new Runnable() {
-			@Override
-			public void run() {
-				updateProviders();
-			}
-		});
+		updateMgr = new SwingUpdateManager(1000, () -> updateProviders());
 
 		createActions();
 	}
@@ -86,16 +74,10 @@ public class TableServicePlugin extends ProgramPlugin
 		// Unusual Code: We, as a plugin, don't have any actions.  Our transient tables do have
 		// 			     actions.  We need a way to have keybindings shared for all the different
 		//				 actions.  Further, we need to register them now, not when the transient
-		//               providers are created, as they would only appear in the options at 
+		//               providers are created, as they would only appear in the options at
 		//               that point.
 		//
-
-		DummyKeyBindingsOptionsAction dummyMakeSelectionAction =
-			new DummyKeyBindingsOptionsAction(MAKE_SELECTION_ACTION_NAME, null);
-
-		tool.addAction(dummyMakeSelectionAction);
-
-		DeleteTableRowAction.registerDummy(tool);
+		DeleteTableRowAction.registerDummy(tool, getName());
 	}
 
 	@Override
@@ -105,9 +87,6 @@ public class TableServicePlugin extends ProgramPlugin
 		super.dispose();
 	}
 
-	/* (non-Javadoc)
-	 * @see ghidra.framework.plugintool.Plugin#processEvent(ghidra.framework.plugintool.PluginEvent)
-	 */
 	@Override
 	public void processEvent(PluginEvent event) {
 		if (event instanceof ProgramClosedPluginEvent) {
@@ -140,7 +119,7 @@ public class TableServicePlugin extends ProgramPlugin
 			return;
 		}
 		// make a copy of the list because the provider updates the list
-		List<TableComponentProvider<?>> list = new ArrayList<TableComponentProvider<?>>(plist);
+		List<TableComponentProvider<?>> list = new ArrayList<>(plist);
 		for (int i = 0; i < list.size(); i++) {
 			ComponentProvider provider = list.get(i);
 			provider.closeComponent();
@@ -154,7 +133,7 @@ public class TableServicePlugin extends ProgramPlugin
 			return;
 		}
 		// make a copy of the list because the dialog updates the list
-		List<TableChooserDialog> list = new ArrayList<TableChooserDialog>(dlist);
+		List<TableChooserDialog> list = new ArrayList<>(dlist);
 		for (int i = 0; i < list.size(); i++) {
 			TableChooserDialog dialog = list.get(i);
 			dialog.close();
@@ -174,9 +153,8 @@ public class TableServicePlugin extends ProgramPlugin
 
 		Program program = model.getProgram();
 
-		TableComponentProvider<T> cp =
-			new TableComponentProvider<T>(this, title, tableTypeName, model,
-				program.getDomainFile().getName(), gotoService, windowSubMenu, navigatable);
+		TableComponentProvider<T> cp = new TableComponentProvider<>(this, title, tableTypeName,
+			model, program.getDomainFile().getName(), gotoService, windowSubMenu, navigatable);
 		addProvider(program, cp);
 		return cp;
 	}
@@ -195,10 +173,9 @@ public class TableServicePlugin extends ProgramPlugin
 		MarkerService markerService = tool.getService(MarkerService.class);
 		Program program = model.getProgram();
 
-		TableComponentProvider<T> cp =
-			new TableComponentProvider<T>(this, title, tableTypeName, model,
-				program.getDomainFile().getName(), gotoService, markerService, markerColor,
-				markerIcon, windowSubMenu, navigatable);
+		TableComponentProvider<T> cp = new TableComponentProvider<>(this, title, tableTypeName,
+			model, program.getDomainFile().getName(), gotoService, markerService, markerColor,
+			markerIcon, windowSubMenu, navigatable);
 		addProvider(program, cp);
 		return cp;
 	}
@@ -206,7 +183,7 @@ public class TableServicePlugin extends ProgramPlugin
 	private void addProvider(Program program, TableComponentProvider<?> provider) {
 		List<TableComponentProvider<?>> list = programMap.get(program);
 		if (list == null) {
-			list = new ArrayList<TableComponentProvider<?>>();
+			list = new ArrayList<>();
 			programMap.put(program, list);
 		}
 		list.add(provider);
@@ -220,6 +197,20 @@ public class TableServicePlugin extends ProgramPlugin
 			if (list.remove(provider)) {
 				if (list.size() == 0) {
 					programMap.remove(p);
+					return;
+				}
+			}
+		}
+	}
+
+	void removeDialog(MyTableChooserDialog dialog) {
+		Iterator<Program> iter = programToDialogMap.keySet().iterator();
+		while (iter.hasNext()) {
+			Program p = iter.next();
+			List<TableChooserDialog> list = programToDialogMap.get(p);
+			if (list.remove(dialog)) {
+				if (list.size() == 0) {
+					programToDialogMap.remove(p);
 					return;
 				}
 			}
@@ -241,7 +232,7 @@ public class TableServicePlugin extends ProgramPlugin
 	}
 
 	private List<TableComponentProvider<?>> getProviders() {
-		List<TableComponentProvider<?>> clist = new ArrayList<TableComponentProvider<?>>();
+		List<TableComponentProvider<?>> clist = new ArrayList<>();
 		Iterator<List<TableComponentProvider<?>>> iter = programMap.values().iterator();
 		while (iter.hasNext()) {
 			List<TableComponentProvider<?>> list = iter.next();
@@ -275,29 +266,13 @@ public class TableServicePlugin extends ProgramPlugin
 			navigatable = gotoService.getDefaultNavigatable();
 		}
 
-		TableChooserDialog dialog =
-			new MyTableChooserDialog(this, executor, program, title, navigatable, isModal);
+		Navigatable nav = navigatable;
+		TableChooserDialog dialog = Swing.runNow(
+			() -> new MyTableChooserDialog(this, executor, program, title, nav, isModal));
 
-		List<TableChooserDialog> list = programToDialogMap.get(program);
-		if (list == null) {
-			list = new ArrayList<TableChooserDialog>();
-			programToDialogMap.put(program, list);
-		}
+		List<TableChooserDialog> list =
+			programToDialogMap.computeIfAbsent(program, p -> new ArrayList<>());
 		list.add(dialog);
 		return dialog;
-	}
-
-	public void removeDialog(MyTableChooserDialog dialog) {
-		Iterator<Program> iter = programToDialogMap.keySet().iterator();
-		while (iter.hasNext()) {
-			Program p = iter.next();
-			List<TableChooserDialog> list = programToDialogMap.get(p);
-			if (list.remove(dialog)) {
-				if (list.size() == 0) {
-					programToDialogMap.remove(p);
-					return;
-				}
-			}
-		}
 	}
 }
